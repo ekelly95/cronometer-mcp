@@ -208,7 +208,10 @@ holds up against multi-month data.
 These remain outside the personal tool:
 
 - Browser automation, mobile endpoint reverse engineering, or arbitrary/raw GWT execution.
-- HTTP transport or remote/multi-user deployment.
+- Multi-user or hosted deployment. *(A single-user remote connector over HTTP was added
+  on 2026-10-07 so the Claude iPhone app can use the server; it is opt-in, listens on
+  loopback behind Tailscale Funnel, and is gated by an owner password. See `REMOTE.md`
+  and §12 of the security audit.)*
 - Code Mode or any sandboxed code execution.
 - Telemetry, crash reporting, or usage analytics.
 - Food-database lookups (USDA/Open Food Facts) — a later milestone, not v1.

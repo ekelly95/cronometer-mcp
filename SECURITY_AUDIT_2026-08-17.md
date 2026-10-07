@@ -613,6 +613,79 @@ method Cronometer has removed.
 
 ---
 
+## 12. Addendum — the remote connector (2026-10-07)
+
+**This is not an independent audit.** It was written by the assistant that implemented
+the change, at the same time, to record what the change does to the threat model in §2.
+Read it as the design's own account of itself, and weigh it accordingly.
+
+§2 listed "network transport" as an explicit non-goal. That has changed on purpose: an
+opt-in remote connector (`src/http/`, `REMOTE.md`) now serves the same 30 tools over
+Streamable HTTP so that Claude's hosted apps — the iPhone app in particular — can use
+them. Those apps reach a connector only from Anthropic's cloud, so the server has to be
+reachable from the public internet. The stdio server is unchanged, and nothing about the
+remote one runs unless it is set up and started.
+
+### What is new to protect
+
+| Asset | Where it lives | Why it matters |
+|---|---|---|
+| Owner password | Only its scrypt hash, in `remote\remote-config.json` | It is the only way to obtain a token |
+| Access and refresh tokens | SHA-256 hashes in `remote\oauth\state.json`; the tokens themselves are held by Anthropic for the connected account | A token is the same reach as the stdio server: every tool, reads and writes |
+| A second Cronometer session | `remote\cronometer\.session.json` | Same as the existing session cookie |
+
+All three sit under the existing ACL-protected directory, which the launcher now also
+checks for the `remote` subdirectory.
+
+### The new boundary
+
+**Internet → Funnel → loopback server.** The Node server listens on `127.0.0.1` only;
+Tailscale Funnel terminates TLS and forwards to it. Nothing on the local network can
+reach the port. Every request is checked in this order:
+
+1. The `Host` header must be the public name (or loopback). Anything else is `403`.
+2. Discovery documents are public by design.
+3. `/register` accepts only Claude's two hosted callback URLs and loopback `/callback`
+   for Claude Code. A client wanting to receive codes anywhere else cannot register.
+4. `/authorize` requires the owner password. Checks are serialised, scrypt-slow, and
+   after five failures in fifteen minutes **all** attempts are refused — including the
+   right password — so the lockout cannot be raced or merely slowed.
+5. `/token` requires S256 PKCE, single-use 60-second codes bound to client and redirect,
+   and rotates refresh tokens. A spent refresh token presented again after a one-minute
+   grace window revokes every token descended from that sign-in.
+6. `/mcp` requires a valid, unexpired bearer token for this exact resource.
+
+### What it does not defend against
+
+- **Someone who learns the owner password.** They can connect their own Claude account,
+  and from then on have what you have. Choose a long one; rotate it by re-running
+  `scripts\setup-remote.ps1`, and revoke existing connections by deleting
+  `remote\oauth\state.json`.
+- **Anthropic's handling of the tokens it holds.** A connected Claude account holds a
+  refresh token valid for up to 30 days of inactivity. Disconnecting in Claude, or
+  deleting the state file, ends that.
+- **Lockout as denial of service.** Anyone who can reach the sign-in page can lock it
+  for fifteen minutes. Existing connections keep working; only new sign-ins wait.
+- **Funnel itself.** Tailscale documents Funnel as beta. The server does not depend on
+  it for anything but TLS and reachability; the checks above apply whatever is in front.
+- **Write approval is now the host's setting, per tool.** `anthropic/requiresUserInteraction`
+  is still sent, but nothing here confirms that claude.ai honours it. `REMOTE.md` tells the
+  owner to set write and delete tools to *Needs approval* on the connector page, which is
+  the control that is documented to work.
+
+### Evidence
+
+`test/http/oauth.test.ts` and `test/http/mcp-http.test.ts` cover each step above,
+offline, against the real app with a fake bridge: foreign redirects refused, unknown
+clients shown a page rather than redirected, HTML-escaping of reflected parameters, the
+lockout including parallel guesses, PKCE mismatch spending the code, code expiry, token
+expiry, refresh rotation, reuse-revokes-family, the 401 discovery challenge, `Host`
+rejection, and that the state file holds no raw token. A full sign-in was also run
+against the built server and against the launcher started from a throwaway profile, with
+dummy credentials, confirming the log carried no secret.
+
+---
+
 ## Appendix — audit boundaries observed
 
 - No Cronometer sign-in, no network request to Cronometer, no live read and no live write.

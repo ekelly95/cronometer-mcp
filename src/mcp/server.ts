@@ -79,6 +79,14 @@ export interface LiveCaller {
 export interface BuildServerOptions {
   readonly bridge?: LiveCaller;
   readonly configuration?: AppConfiguration;
+  /**
+   * Whether closing the server also closes the bridge. Defaults to true, which is
+   * right for stdio: one connection, one helper. The HTTP entry builds a fresh
+   * server for every request and shares one bridge between them, so there the
+   * server must leave it running — otherwise each call would end by killing the
+   * helper and the next would sign in to Cronometer all over again.
+   */
+  readonly ownsBridge?: boolean;
 }
 
 function asParams(input: unknown): JsonObject {
@@ -402,8 +410,9 @@ async function invoke(
 
 class CronometerMcpServer extends McpServer {
   readonly #bridge: LiveCaller;
+  readonly #ownsBridge: boolean;
 
-  public constructor(bridge: LiveCaller, configuration: AppConfiguration) {
+  public constructor(bridge: LiveCaller, configuration: AppConfiguration, ownsBridge: boolean) {
     super(
       { name: 'cronometer-personal', version: SERVER_VERSION },
       {
@@ -414,18 +423,20 @@ class CronometerMcpServer extends McpServer {
       },
     );
     this.#bridge = bridge;
+    this.#ownsBridge = ownsBridge;
   }
 
   public override async close(): Promise<void> {
-    // The helper owns credentials and a session pipe, so it must not outlive the MCP connection.
-    await Promise.allSettled([super.close(), this.#bridge.close()]);
+    // The helper owns credentials and a session pipe, so it must not outlive the MCP
+    // connection — unless it was lent to this server, in which case its owner closes it.
+    await Promise.allSettled([super.close(), this.#ownsBridge ? this.#bridge.close() : undefined]);
   }
 }
 
 export function buildServer(options: BuildServerOptions = {}): McpServer {
   const configuration = options.configuration ?? readConfiguration();
   const bridge = options.bridge ?? new LiveBridge();
-  const server = new CronometerMcpServer(bridge, configuration);
+  const server = new CronometerMcpServer(bridge, configuration, options.ownsBridge ?? true);
 
   for (const definition of LIVE_TOOL_REGISTRY) {
     const meta = metaFor(definition);

@@ -11,7 +11,7 @@ It provides full live access supported by the pinned client: food diary reads an
 - This is an unofficial personal tool. Cronometer does not provide or support this interface. A Cronometer website change can break it without warning, and automated access may put the account at risk. Read Cronometer’s current [Terms of Service](https://mobile.cronometer.com/terms/) before enabling it.
 - Some CSV export features may require Cronometer Gold. Cronometer documents its supported manual export flow in [Account Settings: Data Export](https://support.cronometer.com/hc/en-us/articles/360018760151-Account-Settings).
 - This reports what was logged and how complete the record is. It is not a medical device, does not diagnose nutrient deficiencies, and does not provide medical advice.
-- Keep it local. The project deliberately has no HTTP server, remote deployment mode, telemetry, or arbitrary code-execution tool.
+- Local by default. The stdio server is what Codex, Claude Code and Claude Desktop start. An **opt-in remote connector** serves the same tools over HTTPS behind a single-user OAuth sign-in so the Claude iPhone app can use them — see [REMOTE.md](REMOTE.md). It listens on loopback only and is published deliberately through Tailscale Funnel. There is still no hosted or multi-user deployment, telemetry, or arbitrary code-execution tool.
 
 ## What makes the nutrition summary safer
 
@@ -164,6 +164,7 @@ Approval works differently in each client, so here is exactly what you get where
 | **Claude Code** | Each of the 13 account-changing tools carries `anthropic/requiresUserInteraction`, so it prompts on **every** call — including under `acceptEdits`, `auto`, and `bypassPermissions` — and no allow rule can skip it | The server itself. Nothing to set up. Needs Claude Code 2.1.199 or later |
 | **Codex** | `default_tools_approval_mode = "writes"`, so every tool not marked read-only prompts | The setup script, in Codex's `config.toml` |
 | **Claude Desktop** | Desktop's own tool-approval prompt | Claude Desktop |
+| **Claude web and mobile** (remote connector) | Each tool's permission on the connector page: set writes and deletes to *Needs approval* | You, in claude.ai — see [REMOTE.md](REMOTE.md) |
 
 The Claude Code case is the strong one, because the requirement travels with the tool rather than living in a config file you might change later. The others depend on client configuration: the setup script sets Codex's, and tells you loudly if it could not. Older Claude Code versions ignore the flag and fall back to their normal permission handling, as do other MCP clients — an unknown `_meta` key is harmless, which is why it is sent unconditionally.
 
@@ -231,7 +232,7 @@ The 30 MCP tools are grouped conceptually as follows:
 - Biometrics: read recent values, add a value, and delete a value.
 - Repeated foods: list, add, and delete rules.
 
-There is intentionally no arbitrary GWT request tool, browser automation, raw SQL, shell execution, automatic background sync, or remote HTTP transport.
+There is intentionally no arbitrary GWT request tool, browser automation, raw SQL, shell execution, or automatic background sync. The one HTTP transport is the opt-in, single-user remote connector in [REMOTE.md](REMOTE.md).
 
 ## Development verification
 
@@ -241,9 +242,9 @@ All tests are offline and use synthetic data:
 npm run verify      # typecheck, TypeScript, Python, and the setup scripts
 ```
 
-That is 464 TypeScript tests, 52 Python and 27 setup checks. The individual steps are `npm run typecheck`, `npm test`, `npm run test:python` and `npm run test:setup`; the last skips itself loudly where PowerShell is absent, rather than failing for a reason unrelated to the code being checked.
+That is 508 TypeScript tests, 52 Python and 35 setup checks. The individual steps are `npm run typecheck`, `npm test`, `npm run test:python` and `npm run test:setup`; the last skips itself loudly where PowerShell is absent, rather than failing for a reason unrelated to the code being checked.
 
-`npm test` builds first and checks both legacy MCP and the modern `2026-07-28` stdio handshake. The protocol suite calls every tool against a fake bridge, verifies tool permission labels, checks that every destructive tool refuses an unconfirmed call, ensures read handlers cannot reach mutation methods, and drives hostile multi-line text through both the success and error paths to prove neither can forge the end of the untrusted-data boundary.
+`npm test` builds first and checks both legacy MCP and the modern `2026-07-28` stdio handshake. The protocol suite calls every tool against a fake bridge, verifies tool permission labels, checks that every destructive tool refuses an unconfirmed call, ensures read handlers cannot reach mutation methods, and drives hostile multi-line text through both the success and error paths to prove neither can forge the end of the untrusted-data boundary. The remote connector's suite (`test/http`) runs the whole OAuth sign-in in-process — registration, PKCE, lockout, refresh rotation and reuse revocation — and then both protocol eras over Streamable HTTP with the issued token.
 
 Two honest limits on what those tests show. The generic output schema deliberately types `data` as unknown, because the shape of a live response is Cronometer's to decide — so "validates against the output schema" is a real check only for the export analysis and the parsed diary reads, which are the tools with a fully specified result. And every test is offline: they prove the wrapper behaves, not that the undocumented interface still works.
 
