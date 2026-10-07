@@ -18,6 +18,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent / "vendor"))
 from cronometer_client import (  # noqa: E402
     CronometerClient,
+    _gwt_number,
     CronometerResponseError,
     SessionExpiredError,
     UnverifiedEmpty,
@@ -118,7 +119,6 @@ class ValidationTests(unittest.TestCase):
                 {"source_date": "2026-08-14", "destination_date": "2026-08-15"},
                 "copy_day",
             ),
-            ("set_day_complete", {"date": "2026-08-15", "complete": True}, "set_day_complete"),
             ("get_repeated_items", {}, "get_repeated_items"),
             (
                 "add_repeat_item",
@@ -177,6 +177,54 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(result, {"serving_id": "D80lp$"})
         client.add_serving.assert_called_once()
         self.assertEqual(client.add_serving.call_args.kwargs["day"], date(2026, 8, 16))
+
+    def test_food_write_refuses_a_measure_it_cannot_encode(self) -> None:
+        """add_serving keeps only the low 16 bits of a measure id, so a real one
+        such as 1072101 would be sent as a different number. Only the universal
+        gram measure, 0, goes through until that encoding is verified."""
+        client = _client()
+        with self.assertRaisesRegex(ValueError, "measure_id must be 0"):
+            dispatch(
+                client,
+                "add_food_entry",
+                {
+                    "food_id": 123,
+                    "food_source_id": 456,
+                    "measure_id": 1072101,
+                    "quantity": 2,
+                    "weight_grams": 100,
+                    "date": "2026-08-16",
+                    "diary_group": 1,
+                },
+            )
+        self.assertEqual(client.method_calls, [])
+
+    def test_a_zero_amount_is_not_a_serving(self) -> None:
+        for field in ("quantity", "weight_grams"):
+            with self.subTest(field=field):
+                client = _client()
+                params = {
+                    "food_id": 123,
+                    "food_source_id": 456,
+                    "measure_id": 0,
+                    "quantity": 1,
+                    "weight_grams": 50,
+                    "date": "2026-08-16",
+                    "diary_group": 1,
+                    field: 0,
+                }
+                with self.assertRaisesRegex(ValueError, "outside the supported range"):
+                    dispatch(client, "add_food_entry", params)
+                self.assertEqual(client.method_calls, [])
+
+    def test_set_day_complete_is_not_reachable(self) -> None:
+        """Cronometer removed setDayComplete. A tool that asks for approval and
+        then always fails is worse than no tool, so it is off the allowlist."""
+        self.assertNotIn("set_day_complete", ALLOWED_METHODS)
+        client = _client()
+        with self.assertRaisesRegex(ValueError, "unknown live method"):
+            dispatch(client, "set_day_complete", {"date": "2026-08-15", "complete": True})
+        self.assertEqual(client.method_calls, [])
 
     def test_copying_onto_the_same_day_is_refused(self) -> None:
         client = _client()
@@ -615,8 +663,12 @@ class VendoredClientTests(unittest.TestCase):
 
         client = CronometerClient.__new__(CronometerClient)
         client.gwt_permutation = "A" * 32
+        client._cookie_path = Path(tempfile.gettempdir()) / "cronometer-test-no-such-session"
         for text, expected in ((removed, CronometerResponseError), (expired, SessionExpiredError)):
-            client.session = SimpleNamespace(post=lambda *a, _t=text, **k: FakeResponse(_t))
+            client.session = SimpleNamespace(
+                post=lambda *a, _t=text, **k: FakeResponse(_t),
+                cookies=requests.cookies.RequestsCookieJar(),
+            )
             with self.subTest(text=text[:40]):
                 with self.assertRaises(expected) as caught:
                     CronometerClient._gwt_post(client, "body")
@@ -624,6 +676,75 @@ class VendoredClientTests(unittest.TestCase):
                 # that is precisely what _gwt_read retries on.
                 if expected is CronometerResponseError:
                     self.assertNotIsInstance(caught.exception, SessionExpiredError)
+
+    def _session_client(self, responses: list[str]) -> tuple[Any, list[str]]:
+        """A bare client whose POSTs answer from `responses` in order and whose
+        re-login hands out a new nonce. Returns the client and the bodies sent."""
+
+        class FakeResponse:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+            def raise_for_status(self) -> None:
+                return None
+
+        sent: list[str] = []
+        replies = iter(responses)
+
+        def post(*_args: Any, data: str, **_kwargs: Any) -> FakeResponse:
+            sent.append(data)
+            return FakeResponse(next(replies))
+
+        client = CronometerClient.__new__(CronometerClient)
+        client.gwt_permutation = "A" * 32
+        client.gwt_header = "B" * 32
+        client.nonce = "old-nonce"
+        client.user_id = "42"
+        client._authenticated = True
+        client._cookie_path = Path(tempfile.gettempdir()) / "cronometer-test-no-such-session"
+        client.session = SimpleNamespace(post=post, cookies=requests.cookies.RequestsCookieJar())
+
+        def sign_in() -> None:
+            client.nonce = "new-nonce"
+            client.user_id = "42"
+            client._authenticated = True
+
+        client.authenticate = sign_in
+        return client, sent
+
+    def test_a_read_retry_carries_the_new_nonce(self) -> None:
+        """The body embeds the nonce. Built once, the retry re-sent the dead one
+        and could never succeed; built per attempt, it carries the fresh one."""
+        expired = '//EX[2,1,["NotLoggedInException/1","Invalid or expired session"],0,7]'
+        client, sent = self._session_client([expired, "//OK[0,7]"])
+
+        raw = CronometerClient._gwt_read(client, lambda: f"body|{client.nonce}")
+
+        self.assertEqual(raw, "//OK[0,7]")
+        self.assertEqual(sent, ["body|old-nonce", "body|new-nonce"])
+
+    def test_a_rejected_write_discards_the_session_and_is_not_resent(self) -> None:
+        """A write that meets an expired session fails, once. Before, the dead
+        session stayed marked as signed in and every later write failed the same
+        way; now the next call signs in again."""
+        expired = '//EX[2,1,["NotLoggedInException/1","Invalid or expired session"],0,7]'
+        client, sent = self._session_client([expired])
+
+        with self.assertRaisesRegex(SessionExpiredError, "session was discarded"):
+            CronometerClient._gwt_post(client, "write-body")
+
+        self.assertEqual(sent, ["write-body"])
+        self.assertFalse(client._authenticated)
+        self.assertIsNone(client.nonce)
+
+    def test_numbers_are_written_without_exponents(self) -> None:
+        self.assertEqual(_gwt_number(100.0), "100")
+        self.assertEqual(_gwt_number(0.5), "0.5")
+        self.assertEqual(_gwt_number(0.00001), "0.00001")
+        self.assertEqual(_gwt_number(0.001), "0.001")
+        self.assertEqual(_gwt_number(1234.25), "1234.25")
+        for value in (0.00001, 0.0001234, 99999.125):
+            self.assertNotIn("e", _gwt_number(value).lower())
 
     def test_measure_ids_are_read_from_the_right_place(self) -> None:
         """Upstream read the id from a fixed offset that is a zero field, so every
@@ -944,6 +1065,18 @@ class ErrorRedactionTests(unittest.TestCase):
         self.assertNotIn("password-secret", written)
         self.assertIn("[redacted]", written)
         self.assertIn("RuntimeError", written)
+
+    def test_a_url_query_string_never_reaches_an_error(self) -> None:
+        """Requests puts the whole URL in an HTTPError, and the export URL's query
+        carries a short-lived auth token that is not one of the known secrets."""
+        error = requests.HTTPError(
+            "500 Server Error: oops for url: "
+            "https://cronometer.com/export?nonce=tok3n&generate=servings"
+        )
+        with patch.dict(os.environ, {}, clear=True), patch.object(live_bridge, "_client", None):
+            message = live_bridge._redacted_error(error)
+        self.assertNotIn("tok3n", message)
+        self.assertIn("https://cronometer.com/export?[query removed]", message)
 
     def test_an_error_message_is_bounded(self) -> None:
         with patch.dict(os.environ, {}, clear=True), patch.object(live_bridge, "_client", None):

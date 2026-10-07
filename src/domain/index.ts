@@ -1,6 +1,7 @@
 export type { CalendarDay, LocalTime, LocalTimestamp } from './calendar.js';
 export {
   compareLocalTime,
+  eachCalendarDay,
   minutesFromMidnight,
   parseCalendarDay,
   parseLocalTime,

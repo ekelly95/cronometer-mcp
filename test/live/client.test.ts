@@ -193,6 +193,32 @@ describe('LiveBridge', () => {
     expect(diagnostics).toContain('[redacted]');
   });
 
+  it('redacts a secret that reaches the log split across two writes', async () => {
+    // A pipe delivers text in whatever chunks it likes. Redacting chunk by chunk
+    // missed a password that straddled two of them.
+    const logged: string[] = [];
+    const noisy = new LiveBridge({
+      projectRoot: ROOT,
+      command: process.execPath,
+      args: [
+        '-e',
+        'const p = process.env.CRONOMETER_PASSWORD; process.stderr.write("login failed with " + p.slice(0, 5)); setTimeout(() => { process.stderr.write(p.slice(5) + "\\n"); process.exit(3); }, 100);',
+      ],
+      environment: { CRONOMETER_PASSWORD: 'password-secret' },
+      timeoutMs: 5_000,
+      minimumIntervalMs: 0,
+      diagnostics: (text) => logged.push(text),
+    });
+    bridges.push(noisy);
+
+    await noisy.call('status').catch(() => undefined);
+    const diagnostics = logged.join('');
+
+    expect(diagnostics).toContain('login failed with');
+    expect(diagnostics).not.toContain('passw');
+    expect(diagnostics).toContain('[redacted]');
+  });
+
   it('does not return the child’s diagnostic output to the caller', async () => {
     const noisy = new LiveBridge({
       projectRoot: ROOT,

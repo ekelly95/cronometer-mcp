@@ -170,6 +170,22 @@ try {
     $message = Register-ClaudeDesktopServer -Runner $runner -PowerShellPath $stub -ConfigPath $missing
     Assert-That 'it reports a skip rather than throwing' ($message -match 'not installed')
     Assert-That 'it creates nothing' (-not (Test-Path -LiteralPath $missing))
+
+    # ---------------------------------------------------------------- 7
+    $workspace = New-Workspace 'A Store PowerShell is registered by its alias, not its versioned folder'
+    $storeBuild = 'C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.6.0_x64__8wekyb3d8bbwe\pwsh.exe'
+    $aliasDirectory = Join-Path (Join-Path $workspace 'Microsoft') 'WindowsApps'
+    New-Item -ItemType Directory -Path $aliasDirectory -Force | Out-Null
+    $alias = Join-Path $aliasDirectory 'pwsh.exe'
+    Set-Content -LiteralPath $alias -Value '' -Encoding UTF8
+    Assert-That 'the versioned Store path is swapped for the alias' (
+        (Resolve-StablePowerShellPath -Source $storeBuild -LocalAppData $workspace) -eq $alias)
+    $installed = 'C:\Program Files\PowerShell\7\pwsh.exe'
+    Assert-That 'an ordinary install path is left alone' (
+        (Resolve-StablePowerShellPath -Source $installed -LocalAppData $workspace) -eq $installed)
+    Remove-Item -LiteralPath $alias -Force
+    Assert-That 'with the alias turned off, the Store path is kept rather than inventing one' (
+        (Resolve-StablePowerShellPath -Source $storeBuild -LocalAppData $workspace -WarningAction SilentlyContinue) -eq $storeBuild)
 } finally {
     Write-Host ""
     if ($script:Failures -eq 0) {

@@ -108,6 +108,36 @@ function Set-CodexWriteApprovalMode {
     }
 }
 
+function Resolve-StablePowerShellPath {
+    <#
+        The path written into an MCP client's config has to outlive PowerShell
+        updates. Run from the Microsoft Store build, `(Get-Command pwsh).Source` is
+        `C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.6.0_x64__...\pwsh.exe`,
+        and that folder is replaced on the next Store update. A registration
+        pointing there stops starting, and the client only says the server failed.
+
+        The app execution alias in %LOCALAPPDATA%\Microsoft\WindowsApps is what the
+        Store keeps pointing at the current version, so that is what gets written.
+        Every other install location is already stable and passes through as is.
+    #>
+    param(
+        [Parameter(Mandatory)] [string]$Source,
+        [string]$LocalAppData = $env:LOCALAPPDATA
+    )
+
+    if ($Source -notmatch '\\WindowsApps\\Microsoft\.PowerShell_[^\\]+\\pwsh\.exe$') {
+        return $Source
+    }
+    if (-not [string]::IsNullOrWhiteSpace($LocalAppData)) {
+        $alias = Join-Path (Join-Path (Join-Path $LocalAppData 'Microsoft') 'WindowsApps') 'pwsh.exe'
+        if (Test-Path -LiteralPath $alias) {
+            return $alias
+        }
+    }
+    Write-Warning "PowerShell is the Microsoft Store build and its app execution alias is turned off, so the registration will use $Source. That path changes when the Store updates PowerShell; re-run this setup after an update, or turn the pwsh alias back on in Settings > Apps > Advanced app settings > App execution aliases."
+    return $Source
+}
+
 function Get-PropertyName {
     <#
         `$object.PSObject.Properties.Name` throws under Set-StrictMode when the
@@ -256,7 +286,7 @@ Write-Host ''
 Write-Host 'The server is built, tested, and configured. No plaintext password was written to the project or an MCP config.'
 
 if (-not $SkipClientRegistration) {
-    $powerShell = (Get-Command pwsh -ErrorAction Stop).Source
+    $powerShell = Resolve-StablePowerShellPath (Get-Command pwsh -ErrorAction Stop).Source
 
     if (Get-Command codex -ErrorAction SilentlyContinue) {
         if (Read-YesNo 'Register cronometer-personal with Codex for this Windows account?' $true) {

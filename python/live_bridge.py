@@ -38,6 +38,13 @@ _MAX_DATE_RANGE_DAYS = 366
 _HASH = re.compile(r"^[A-F0-9]{32}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9$._-]{1,64}$")
 _TRUTHY = {"1", "true", "yes", "on"}
+# A logged amount of zero is a mistake, not a serving. Mirrors `amount` in
+# src/mcp/registry.ts.
+_SMALLEST_AMOUNT = 0.001
+# Requests puts the full URL in an HTTPError message, query string and all, and the
+# export URL's query carries a short-lived auth token. The token is not one of the
+# known secrets `_redact` can match, so the query is dropped wholesale instead.
+_URL_QUERY = re.compile(r"(https?://[^\s?#'\"]+)\?[^\s'\"]*")
 # Mirrors BIOMETRIC_RANGES in src/mcp/registry.ts. Wide enough for any unit
 # Cronometer can display, narrow enough to catch a transposed digit.
 _BIOMETRIC_RANGES = {
@@ -68,7 +75,6 @@ ALLOWED_METHODS = frozenset(
         "add_biometric",
         "remove_biometric",
         "copy_day",
-        "set_day_complete",
         "get_repeated_items",
         "add_repeat_item",
         "delete_repeat_item",
@@ -330,13 +336,6 @@ def _number(
     return result
 
 
-def _boolean(params: dict[str, Any], name: str) -> bool:
-    value = params.get(name)
-    if not isinstance(value, bool):
-        raise ValueError(f"{name} must be true or false")
-    return value
-
-
 def _date(params: dict[str, Any], name: str) -> date:
     value = _string(params, name, maximum=10)
     try:
@@ -395,12 +394,21 @@ def dispatch(client: CronometerClient, method: str, raw_params: Any) -> Any:
             result.pop("raw_response", None)
         return result
     if method == "add_food_entry":
+        # Only the universal gram measure (0) is accepted. The client packs the
+        # diary group into a measure id's high 16 bits and keeps only the low 16 of
+        # what it was given, so a real measure id such as 1072101 would be sent as
+        # a different number. Nobody has verified what Cronometer does with that.
+        if _integer(params, "measure_id") != 0:
+            raise ValueError(
+                "measure_id must be 0 (the universal gram measure); other measure ids "
+                "are not encoded correctly yet"
+            )
         return client.add_serving(
             food_id=_integer(params, "food_id", minimum=1),
             food_source_id=_integer(params, "food_source_id", minimum=1),
-            measure_id=_integer(params, "measure_id"),
-            quantity=_number(params, "quantity", maximum=100_000),
-            weight_grams=_number(params, "weight_grams", maximum=100_000),
+            measure_id=0,
+            quantity=_number(params, "quantity", minimum=_SMALLEST_AMOUNT, maximum=100_000),
+            weight_grams=_number(params, "weight_grams", minimum=_SMALLEST_AMOUNT, maximum=100_000),
             day=_date(params, "date"),
             diary_group=_integer(params, "diary_group", minimum=1, maximum=4),
         )
@@ -475,15 +483,13 @@ def dispatch(client: CronometerClient, method: str, raw_params: Any) -> Any:
         if source == destination:
             raise ValueError("source_date and destination_date must be different")
         return client.copy_day(source, destination)
-    if method == "set_day_complete":
-        return client.set_day_complete(_date(params, "date"), _boolean(params, "complete"))
     if method == "get_repeated_items":
         return client.get_repeated_items()
     if method == "add_repeat_item":
         return client.add_repeat_item(
             food_source_id=_integer(params, "food_source_id", minimum=1),
             food_id=_integer(params, "food_id", minimum=1),
-            quantity=_number(params, "quantity", maximum=100_000),
+            quantity=_number(params, "quantity", minimum=_SMALLEST_AMOUNT, maximum=100_000),
             food_name=_string(params, "food_name", maximum=500, protocol_text=True),
             diary_group=_integer(params, "diary_group", minimum=1, maximum=4),
             days_of_week=_days_of_week(params),
@@ -537,7 +543,8 @@ def _redact(text: str) -> str:
 
 
 def _redacted_error(error: Exception) -> str:
-    return _redact(f"{type(error).__name__}: {error}")[:1000]
+    text = _URL_QUERY.sub(r"\1?[query removed]", f"{type(error).__name__}: {error}")
+    return _redact(text)[:1000]
 
 
 class _RedactingFilter(logging.Filter):

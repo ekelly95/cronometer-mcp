@@ -63,6 +63,13 @@ Deliberate changes from upstream, each marked `MODIFIED` at the site:
      back with food_source_id and measure_id swapped, an always-empty weekday
      list, and a diary group of 0 that Cronometer never sent. Confirmed against
      two records written with deliberately distinct values.
+ 12. A rejected session is discarded where it is detected, in `_gwt_post`, so a
+     write that meets an expired session no longer leaves every later write to
+     fail the same way. Nothing is re-sent. And `_gwt_read` takes a body builder
+     rather than a body: the body embeds the nonce, so the old retry re-sent the
+     dead one and could never succeed.
+ 13. Numbers in GWT bodies are written without exponents (`_gwt_number`).
+     Upstream's `str()` turned 0.00001 into `1e-05`.
 
 Keep this list current. It is the whole record of how this file differs from the
 code it came from.
@@ -75,12 +82,27 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+
+def _gwt_number(value: float) -> str:
+    """A number as the GWT body expects it: integers bare, never an exponent.
+
+    MODIFIED (13): upstream wrote floats with `str()`, which switches to exponent
+    form below 1e-4 — `str(0.00001)` is `1e-05` — and Cronometer's parser was
+    never shown to accept that. `Decimal(repr(...))` keeps the shortest exact
+    digits and the `f` format spells them out positionally.
+    """
+    if value == int(value):
+        return str(int(value))
+    return format(Decimal(repr(float(value))), "f")
 
 
 # MODIFIED (3): the two failure kinds that upstream expressed as `return []`.
@@ -664,14 +686,24 @@ class CronometerClient:
         """Empty, and honest about which kind of empty it is."""
         return [] if CronometerClient._is_confirmed_empty(raw) else UnverifiedEmpty()
 
-    def _reauthenticate(self) -> None:
-        """Discard cached session state and sign in again."""
-        logger.info("Session rejected; signing in again")
+    def _discard_session(self) -> None:
+        """Forget the session so the next call signs in from scratch.
+
+        MODIFIED (12): split out of `_reauthenticate` so a rejected *write* can
+        discard a dead session without retrying. Before this, only a read could
+        reset it, and a write that met an expired session left `_authenticated`
+        set: every later write failed the same way until a read happened by.
+        """
         self._authenticated = False
         self.nonce = None
         self.user_id = None
         self.session.cookies.clear()
         self._cookie_path.unlink(missing_ok=True)
+
+    def _reauthenticate(self) -> None:
+        """Discard cached session state and sign in again."""
+        logger.info("Session rejected; signing in again")
+        self._discard_session()
         self.authenticate()
 
     # MODIFIED (5): upstream persisted the session with `pickle.dumps` and restored
@@ -837,27 +869,37 @@ class CronometerClient:
                         "been changed or removed on their side, so retrying will not "
                         f"help. Response: {resp.text[:300]}"
                     )
+                # MODIFIED (12): the session is dead either way, so forget it here,
+                # where reads and writes both pass. Nothing is re-sent — a write
+                # still fails — but the next call signs in instead of reusing it.
+                self._discard_session()
                 raise SessionExpiredError(
-                    f"Cronometer rejected the call. Response: {resp.text[:300]}"
+                    "Cronometer rejected the call, most likely because the session "
+                    "expired. The saved session was discarded, so the next call signs "
+                    f"in again. Response: {resp.text[:300]}"
                 )
             raise CronometerResponseError(
                 f"GWT-RPC call failed. Response: {resp.text[:300]}"
             )
         return resp.text
 
-    def _gwt_read(self, body: str) -> str:
+    def _gwt_read(self, build_body: Callable[[], str]) -> str:
         """A read-only GWT call, which may re-authenticate once and try again.
 
         MODIFIED (2): deliberately separate from `_gwt_post`. Only read methods
         call this. A write must never land here — repeating a write whose outcome
         is unknown is the failure this project promises it does not have, and the
         separation is what makes that checkable rather than merely intended.
+
+        MODIFIED (12): takes a body *builder*, not a body. Every GWT body embeds
+        the session nonce, and signing in again replaces it, so a body built before
+        the retry carried the dead nonce into it and the retry could not succeed.
         """
         try:
-            return self._gwt_post(body)
+            return self._gwt_post(build_body())
         except SessionExpiredError:
             self._reauthenticate()
-            return self._gwt_post(body)
+            return self._gwt_post(build_body())
 
     # MODIFIED (1): _parse_find_foods, the GWT wire-format parser for the removed
     # findFoods method, was deleted with it. Roughly 170 lines of string-table
@@ -1000,13 +1042,13 @@ class CronometerClient:
               - ``weight_grams`` (float): Weight in grams for this measure.
         """
         self.authenticate()
-        body = (
+        # Built lazily: after a re-login the retry needs the new nonce.
+        raw = self._gwt_read(lambda: (
             GWT_GET_FOOD
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
             .replace("{food_source_id}", str(food_source_id))
-        )
-        raw = self._gwt_read(body)
+        ))
         return self._parse_get_food(raw, food_source_id)
 
     @staticmethod
@@ -1200,8 +1242,8 @@ class CronometerClient:
         encoded_measure = (diary_group << 16) | measure_base
 
         # Cronometer sends integer quantities without a decimal point
-        quantity_str = str(int(quantity)) if quantity == int(quantity) else str(quantity)
-        weight_str = str(int(weight_grams)) if weight_grams == int(weight_grams) else str(weight_grams)
+        quantity_str = _gwt_number(quantity)
+        weight_str = _gwt_number(weight_grams)
 
         body = (
             GWT_UPDATE_DIARY
@@ -1570,13 +1612,13 @@ class CronometerClient:
             - template_id (int): Template ID (0 for custom)
         """
         self.authenticate()
-        body = (
+        # Built lazily: after a re-login the retry needs the new nonce.
+        raw = self._gwt_read(lambda: (
             GWT_GET_ALL_MACRO_SCHEDULES
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
             .replace("{user_id}", self.user_id or "")
-        )
-        raw = self._gwt_read(body)
+        ))
         return self._parse_all_macro_schedules(raw)
 
     def get_daily_macro_targets(self, day: date | None = None) -> dict:
@@ -1592,7 +1634,8 @@ class CronometerClient:
         self.authenticate()
         if day is None:
             day = date.today()
-        body = (
+        # Built lazily: after a re-login the retry needs the new nonce.
+        raw = self._gwt_read(lambda: (
             GWT_GET_DAILY_MACRO_TARGET_TEMPLATE
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
@@ -1600,8 +1643,7 @@ class CronometerClient:
             .replace("{day}", str(day.day))
             .replace("{month}", str(day.month))
             .replace("{year}", str(day.year))
-        )
-        raw = self._gwt_read(body)
+        ))
         return self._parse_macro_target_template(raw)
 
     def update_daily_targets(
@@ -1628,10 +1670,6 @@ class CronometerClient:
         """
         self.authenticate()
 
-        # Format numeric values: integers as int, otherwise float
-        def _fmt(v: float) -> str:
-            return str(int(v)) if v == int(v) else str(v)
-
         body = (
             GWT_UPDATE_DAILY_TARGET_TEMPLATE
             .replace("{gwt_header}", self.gwt_header)
@@ -1641,10 +1679,10 @@ class CronometerClient:
             .replace("{day}", str(day.day))
             .replace("{month}", str(day.month))
             .replace("{year}", str(day.year))
-            .replace("{protein}", _fmt(protein_g))
-            .replace("{fat}", _fmt(fat_g))
-            .replace("{carbs}", _fmt(carbs_g))
-            .replace("{calories}", _fmt(calories))
+            .replace("{protein}", _gwt_number(protein_g))
+            .replace("{fat}", _gwt_number(fat_g))
+            .replace("{carbs}", _gwt_number(carbs_g))
+            .replace("{calories}", _gwt_number(calories))
         )
         raw = self._gwt_post(body)
         # Success: //OK[1,2,1,["...ResponseEvent...","Success"],0,7]
@@ -1667,13 +1705,13 @@ class CronometerClient:
             protein_g, fat_g, calories, carbs_g.
         """
         self.authenticate()
-        body = (
+        # Built lazily: after a re-login the retry needs the new nonce.
+        raw = self._gwt_read(lambda: (
             GWT_GET_MACRO_TARGET_TEMPLATES
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
             .replace("{user_id}", self.user_id or "")
-        )
-        raw = self._gwt_read(body)
+        ))
         return self._parse_macro_target_templates(raw)
 
     @staticmethod
@@ -1830,8 +1868,6 @@ class CronometerClient:
         """
         self.authenticate()
 
-        def _fmt(v: float) -> str:
-            return str(int(v)) if v == int(v) else str(v)
 
         # Build the GWT-RPC payload dynamically because the fat field
         # uses object back-references when fat == carbs (GWT optimization).
@@ -1839,10 +1875,10 @@ class CronometerClient:
         #  1=module, 2=gwt_header, 3=service, 4=method, 5=String type,
         #  6=I type, 7=MacroTargetTemplate type, 8=nonce, 9=Boolean type,
         #  10=Double type, 11=Integer type, 12=Rigorous, 13=template_name
-        carbs_str = _fmt(carbs_g)
-        fat_str = _fmt(fat_g)
-        cal_str = _fmt(calories)
-        protein_str = _fmt(protein_g)
+        carbs_str = _gwt_number(carbs_g)
+        fat_str = _gwt_number(fat_g)
+        cal_str = _gwt_number(calories)
+        protein_str = _gwt_number(protein_g)
 
         if fat_g == carbs_g:
             # Fat equals carbs: use back-reference -3 (refers to
@@ -1952,13 +1988,13 @@ class CronometerClient:
             recurrence_rule, start_ts, end_ts, notes, is_active.
         """
         self.authenticate()
-        body = (
+        # Built lazily: after a re-login the retry needs the new nonce.
+        raw = self._gwt_read(lambda: (
             GWT_GET_USER_FASTS
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
             .replace("{user_id}", self.user_id or "")
-        )
-        raw = self._gwt_read(body)
+        ))
         return self._parse_fasts(raw)
 
     def get_user_fasts_for_range(
@@ -1974,7 +2010,8 @@ class CronometerClient:
             List of fast dicts.
         """
         self.authenticate()
-        body = (
+        # Built lazily: after a re-login the retry needs the new nonce.
+        raw = self._gwt_read(lambda: (
             GWT_GET_USER_FASTS_FOR_RANGE
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
@@ -1985,8 +2022,7 @@ class CronometerClient:
             .replace("{end_day}", str(end.day))
             .replace("{end_month}", str(end.month))
             .replace("{end_year}", str(end.year))
-        )
-        raw = self._gwt_read(body)
+        ))
         return self._parse_fasts(raw)
 
     def get_fasting_stats(self) -> dict:
@@ -1997,13 +2033,13 @@ class CronometerClient:
             seven_fast_avg_hours, completed_count.
         """
         self.authenticate()
-        body = (
+        # Built lazily: after a re-login the retry needs the new nonce.
+        raw = self._gwt_read(lambda: (
             GWT_GET_FASTING_STATS
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
             .replace("{user_id}", self.user_id or "")
-        )
-        raw = self._gwt_read(body)
+        ))
         return self._parse_fasting_stats(raw)
 
     def delete_fast(self, fast_id: int) -> bool:
@@ -2246,13 +2282,13 @@ class CronometerClient:
             date, metric_name (if available).
         """
         self.authenticate()
-        body = (
+        # Built lazily: after a re-login the retry needs the new nonce.
+        raw = self._gwt_read(lambda: (
             GWT_GET_RECENT_BIOMETRICS
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
             .replace("{user_id}", self.user_id or "")
-        )
-        raw = self._gwt_read(body)
+        ))
         return self._parse_recent_biometrics(raw)
 
     def add_biometric(
@@ -2287,15 +2323,13 @@ class CronometerClient:
 
         info = _BIOMETRIC_TYPES[metric_type]
 
-        def _fmt(v: float) -> str:
-            return str(int(v)) if v == int(v) else str(v)
 
         body = (
             GWT_ADD_BIOMETRIC
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
             .replace("{user_id}", self.user_id or "")
-            .replace("{value}", _fmt(value))
+            .replace("{value}", _gwt_number(value))
             .replace("{day}", str(day.day))
             .replace("{month}", str(day.month))
             .replace("{year}", str(day.year))
@@ -2549,13 +2583,13 @@ class CronometerClient:
             diary_group, days_of_week.
         """
         self.authenticate()
-        body = (
+        # Built lazily: after a re-login the retry needs the new nonce.
+        raw = self._gwt_read(lambda: (
             GWT_GET_REPEATED_ITEMS
             .replace("{gwt_header}", self.gwt_header)
             .replace("{nonce}", self.nonce or "")
             .replace("{user_id}", self.user_id or "")
-        )
-        raw = self._gwt_read(body)
+        ))
         return self._parse_repeated_items(raw)
 
     def add_repeat_item(
@@ -2590,7 +2624,7 @@ class CronometerClient:
         day_entries = "|".join(f"10|{d}" for d in days_of_week)
 
         # Format quantity as float-like string for GWT
-        qty_str = str(int(quantity)) if quantity == int(quantity) else str(quantity)
+        qty_str = _gwt_number(quantity)
 
         body = (
             GWT_ADD_REPEAT_ITEM

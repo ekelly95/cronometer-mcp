@@ -14,8 +14,6 @@ export interface JsonObject {
 export type LiveMethod =
   | 'status'
   | 'check_connection'
-  | 'get_food_log'
-  | 'get_daily_summary'
   | 'export_raw'
   | 'search_foods'
   | 'get_food_details'
@@ -35,7 +33,6 @@ export type LiveMethod =
   | 'add_biometric'
   | 'remove_biometric'
   | 'copy_day'
-  | 'set_day_complete'
   | 'get_repeated_items'
   | 'add_repeat_item'
   | 'delete_repeat_item';
@@ -92,6 +89,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROJECT_ROOT = resolve(HERE, '..', '..');
 const MAX_REPLY_CHARACTERS = 30 * 1024 * 1024;
 const MINIMUM_CALL_INTERVAL_MS = 1_000;
+/** Diagnostics held back waiting for a newline before they are flushed anyway. */
+const MAX_PENDING_DIAGNOSTIC_CHARACTERS = 64 * 1024;
 
 function interpreter(projectRoot: string): string {
   const configured = process.env['CRONOMETER_PYTHON'];
@@ -157,6 +156,7 @@ export class LiveBridge {
   #pending = new Map<number, PendingRequest>();
   #queue: Promise<void> = Promise.resolve();
   #stdoutBuffer = '';
+  #stderrBuffer = '';
 
   public constructor(options: LiveBridgeOptions = {}) {
     this.#projectRoot = resolve(options.projectRoot ?? DEFAULT_PROJECT_ROOT);
@@ -248,6 +248,7 @@ export class LiveBridge {
     child.stdout.on('data', (chunk: string) => {
       if (this.#child === child) this.#receiveChunk(chunk);
     });
+    this.#stderrBuffer = '';
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
       if (this.#child !== child) return;
@@ -258,7 +259,12 @@ export class LiveBridge {
       // secret to land, not the safer one. The Python side scrubs cookies and the
       // nonce at source; this catches the credentials this process can see.
       // stdout is the MCP protocol stream and is never touched here.
-      this.#diagnostics(redactSecrets(chunk, this.#environment));
+      this.#receiveDiagnostics(chunk);
+    });
+    // Whatever was still waiting for a newline when the helper stopped.
+    child.stderr.on('end', () => {
+      this.#flushDiagnostics(this.#stderrBuffer);
+      this.#stderrBuffer = '';
     });
     child.on('error', (error) => {
       if (this.#child !== child) return;
@@ -278,6 +284,28 @@ export class LiveBridge {
       );
     });
     return child;
+  }
+
+  /**
+   * Redaction works on whole lines. A pipe hands text over in whatever chunks it
+   * likes, and a password split across two of them matched neither, so text is
+   * held until its newline arrives — or until there is too much of it to hold.
+   */
+  #receiveDiagnostics(chunk: string): void {
+    this.#stderrBuffer += chunk;
+    const lastNewline = this.#stderrBuffer.lastIndexOf('\n');
+    if (lastNewline !== -1) {
+      this.#flushDiagnostics(this.#stderrBuffer.slice(0, lastNewline + 1));
+      this.#stderrBuffer = this.#stderrBuffer.slice(lastNewline + 1);
+    }
+    if (this.#stderrBuffer.length > MAX_PENDING_DIAGNOSTIC_CHARACTERS) {
+      this.#flushDiagnostics(this.#stderrBuffer);
+      this.#stderrBuffer = '';
+    }
+  }
+
+  #flushDiagnostics(text: string): void {
+    if (text !== '') this.#diagnostics(redactSecrets(text, this.#environment));
   }
 
   #send(method: LiveMethod, params: JsonObject): Promise<LiveResult> {

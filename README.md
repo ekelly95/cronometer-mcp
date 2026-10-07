@@ -4,7 +4,7 @@ This is a local, personal bridge between Cronometer and MCP clients such as Code
 
 It is a personal learning project built by a NASM Certified Sports Nutrition Coach (CSNC) who has also taken university-level nutrition courses outside their degree major. That background informs the project’s priorities, but this software is not a medical device or a substitute for medical care.
 
-It provides full live access supported by the pinned client: food diary reads and writes, coverage-aware nutrient summaries, raw CSV exports, food search, macro targets and schedules, fasting records, biometrics, day copying/completion, and repeated foods.
+It provides full live access supported by the pinned client: food diary reads and writes, coverage-aware nutrient analysis of downloaded exports, raw CSV exports, food search, macro targets and schedules, fasting records, biometrics, day copying, and repeated foods.
 
 ## Important limits
 
@@ -84,10 +84,14 @@ Cronometer offers the same data two ways, and they are not equivalent:
 
 | | Rows | Can it tell missing from zero? |
 |---|---|---|
-| **Live** (`cronometer_get_nutrition_summary`) | One per **day**, already totalled | **No** |
+| **Live** (`cronometer_export_raw` with `daily_summary`) | One per **day**, already totalled | **No** |
 | **Downloaded** (`cronometer_analyze_export`) | One per **meal**, plus Cronometer's own total | **Yes** |
 
-Coverage works by comparing meals. If Lunch's omega-3 cell is blank while Breakfast reads `0.00`, that is a database gap, not a zero intake. The live export has already collapsed those meals into one number — and that number is precisely the one that counted the blanks as zero. So the live summary now refuses the question and points here rather than returning something that looks like an answer.
+Coverage works by comparing meals. If Lunch's omega-3 cell is blank while Breakfast reads `0.00`, that is a database gap, not a zero intake. The live export has already collapsed those meals into one number — and that number is precisely the one that counted the blanks as zero. So there is no live nutrition summary. There used to be a `cronometer_get_nutrition_summary` tool, but against the real live export it could only ever refuse, so it was removed rather than left to cost a call and an error every time.
+
+Two things about reading the result. A nutrient's `value` is the **sum** over the days listed in `days`, not a daily figure. And a day inside the requested range that has no rows at all adds nothing to that sum — the same missing-as-zero trap one level up — so those days are listed in `daysAbsentFromExport`, with `daysInRange` beside them. Average over the days that were actually logged.
+
+If a future export drops or renames a single nutrient column, the analysis still runs: that nutrient comes back as insufficient data with a `missing-nutrient-column` issue, and the other sixty are unaffected. Only a missing `Date`, `Group` or `Completed` column stops it.
 
 On a real day from this account, at full coverage: **16 of 61 nutrients** could be reported as numbers. The other **45** were refused, every one of them a case where Cronometer's own total had summed absent data as zero. Energy and protein matched Cronometer exactly and are trustworthy. Omega-3 read 0.01 g — on a day containing salmon — from only two of four meals.
 
@@ -102,7 +106,11 @@ Verified working end to end on 2026-08-17: search, add, read back, delete, read 
 It takes two steps, because a diary entry is identified by a *measure* rather than by a food:
 
 1. `cronometer_search_foods` — returns `food_source_id` (the food) and `food_id` (its default measure), plus a description like `1 large - 50g` telling you what one of them weighs.
-2. `cronometer_add_food_entry` — pass both identifiers, `measure_id: 0`, the number of measures as `quantity`, and the real total weight as `weight_grams`.
+2. `cronometer_add_food_entry` — pass both identifiers, `measure_id: 0`, the number of measures as `quantity`, and the real total weight as `weight_grams`. Both amounts must be above zero.
+
+`measure_id` accepts only `0`, the universal gram measure. The protocol packs the diary group into the top 16 bits of the measure id and keeps only the bottom 16 of whatever it is given, so a real measure id from `cronometer_get_food_details` (such as `1072101`) would be sent as a different number. Until that encoding is verified against a real entry, other ids are refused rather than logged against whatever the truncated number means.
+
+One thing still worth a deliberate check: the vendored client's own docstring says that with the gram measure, `quantity` should equal `weight_grams`, while the flow above passes the number of measures. The 2026-08-17 test used the flow above. If an entry's displayed amount looks wrong in the app, that is the first place to look.
 
 `cronometer_get_food_details` lists every measure a food has with its gram weight, so you can work out `weight_grams` for "two large" or "half a cup" without guessing.
 
@@ -125,8 +133,9 @@ add/delete, biometric add/remove for **weight**, and adding then removing a food
   mis-file the same way. A write that quietly files data under the wrong metric
   corrupts a trend you read later and gives no sign it happened, so the other metrics
   are refused. Record them in the Cronometer app.
-- `cronometer_set_day_complete` fails: Cronometer has removed the `setDayComplete`
-  method, the same way it removed `findFoods`. Nothing local can fix that.
+- `cronometer_set_day_complete` failed: Cronometer has removed the `setDayComplete`
+  method, the same way it removed `findFoods`. Nothing local can fix that, so the tool
+  has been removed — it asked for approval and then failed every time.
 
 **Fixed after a live test.** `cronometer_get_repeated_items` used to return
 `food_source_id` and `measure_id` transposed, an always-empty weekday list, and a diary
@@ -152,7 +161,7 @@ Approval works differently in each client, so here is exactly what you get where
 
 | Client | What makes a write ask first | Configured by |
 |---|---|---|
-| **Claude Code** | Each of the 14 account-changing tools carries `anthropic/requiresUserInteraction`, so it prompts on **every** call — including under `acceptEdits`, `auto`, and `bypassPermissions` — and no allow rule can skip it | The server itself. Nothing to set up. Needs Claude Code 2.1.199 or later |
+| **Claude Code** | Each of the 13 account-changing tools carries `anthropic/requiresUserInteraction`, so it prompts on **every** call — including under `acceptEdits`, `auto`, and `bypassPermissions` — and no allow rule can skip it | The server itself. Nothing to set up. Needs Claude Code 2.1.199 or later |
 | **Codex** | `default_tools_approval_mode = "writes"`, so every tool not marked read-only prompts | The setup script, in Codex's `config.toml` |
 | **Claude Desktop** | Desktop's own tool-approval prompt | Claude Desktop |
 
@@ -161,6 +170,8 @@ The Claude Code case is the strong one, because the requirement travels with the
 Read tools deliberately carry no such flag. A status check that nagged would only teach you to click through prompts without reading them.
 
 Writes are never retried automatically. If a write times out, the server reports that its outcome is unknown. Inspect the Cronometer app before deciding whether to try anything again; otherwise a retry could duplicate food, biometrics, templates, or repeated items.
+
+An expired session is handled differently for reads and writes. A read signs in again and tries once more. A write that meets an expired session fails, and is not re-sent, but the dead session is discarded so the next call signs in afresh instead of failing the same way.
 
 ## Manual MCP registration
 
@@ -193,7 +204,7 @@ Claude Desktop has no registration command. Add this to the `mcpServers` object 
 }
 ```
 
-Use the real path to `pwsh.exe` on this machine — `(Get-Command pwsh).Source` prints it. Back the file up before editing: it holds Claude Desktop's own preferences as well as the server list, and a bad edit loses them. The setup script does all of that for you, which is the better route.
+Use the real path to `pwsh.exe` on this machine — `(Get-Command pwsh).Source` prints it. If that path is under `C:\Program Files\WindowsApps\` (the Microsoft Store build), use `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe` instead: the versioned folder is replaced on every Store update, and a registration that points into it stops starting. The setup script makes that substitution itself. Back the file up before editing: it holds Claude Desktop's own preferences as well as the server list, and a bad edit loses them. The setup script does all of that for you, which is the better route.
 
 Check registration with `codex mcp get cronometer-personal` or `claude mcp get cronometer-personal`. Anthropic’s current [Claude Code MCP guide](https://code.claude.com/docs/en/mcp) explains its configuration scopes and the [permission rules](https://code.claude.com/docs/en/permissions) that apply to MCP tools. Codex uses the same MCP configuration for its CLI and IDE extension; see OpenAI’s [MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
@@ -209,11 +220,11 @@ Packaging this as a Desktop Extension (`.mcpb`/`.dxt`) would remove the hand-edi
 
 ## Useful tools
 
-The 32 MCP tools are grouped conceptually as follows:
+The 30 MCP tools are grouped conceptually as follows:
 
 - Connection: status and connection check.
 - Downloaded exports: list them, and run the coverage-aware nutrient analysis over one. These read a folder on this computer and never touch the network.
-- Diary: food log, exercise, biometric history, notes, coverage-aware nutrition summary, raw CSV export, add/remove food, copy a day, and mark a day complete.
+- Diary: food log, exercise, biometric history, notes, raw CSV export, add/remove food, and copy a day.
 - Food database: search and food details.
 - Macros: read targets/schedules, set daily targets, list/create/delete templates, and assign a template to a weekday.
 - Fasting: history, statistics, delete a fast, and cancel an active fast while keeping its series.
@@ -230,11 +241,11 @@ All tests are offline and use synthetic data:
 npm run verify      # typecheck, TypeScript, Python, and the setup scripts
 ```
 
-That is 450 TypeScript tests, 45 Python and 24 setup checks. The individual steps are `npm run typecheck`, `npm test`, `npm run test:python` and `npm run test:setup`; the last skips itself loudly where PowerShell is absent, rather than failing for a reason unrelated to the code being checked.
+That is 464 TypeScript tests, 52 Python and 27 setup checks. The individual steps are `npm run typecheck`, `npm test`, `npm run test:python` and `npm run test:setup`; the last skips itself loudly where PowerShell is absent, rather than failing for a reason unrelated to the code being checked.
 
 `npm test` builds first and checks both legacy MCP and the modern `2026-07-28` stdio handshake. The protocol suite calls every tool against a fake bridge, verifies tool permission labels, checks that every destructive tool refuses an unconfirmed call, ensures read handlers cannot reach mutation methods, and drives hostile multi-line text through both the success and error paths to prove neither can forge the end of the untrusted-data boundary.
 
-Two honest limits on what those tests show. The generic output schema deliberately types `data` as unknown, because the shape of a live response is Cronometer's to decide — so "validates against the output schema" is a real check only for the nutrition summary, which is the one tool with a fully specified result. And every test is offline: they prove the wrapper behaves, not that the undocumented interface still works.
+Two honest limits on what those tests show. The generic output schema deliberately types `data` as unknown, because the shape of a live response is Cronometer's to decide — so "validates against the output schema" is a real check only for the export analysis and the parsed diary reads, which are the tools with a fully specified result. And every test is offline: they prove the wrapper behaves, not that the undocumented interface still works.
 
 The only live check that should be run casually is the connection check. Do not test write tools against the real account unless the intended account change is itself the test.
 

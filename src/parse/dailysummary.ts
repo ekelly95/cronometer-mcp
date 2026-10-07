@@ -70,7 +70,7 @@ export function parseDailySummary(
         issue(
           file,
           header.line,
-          'missing-column',
+          'missing-nutrient-column',
           'nutrient column not in this export; it will read as Missing everywhere',
           nutrient.csvHeader,
         ),

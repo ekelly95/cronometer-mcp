@@ -22,13 +22,13 @@
     "verify": "npm run typecheck && npm test && npm run test:python && npm run test:setup"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/client": "2.3.1",
     "@types/node": "24.13.3",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.0.0",
-    "zod": "4.4.3"
+    "@modelcontextprotocol/server": "2.3.1",
+    "zod": "4.6.5"
   }
 }

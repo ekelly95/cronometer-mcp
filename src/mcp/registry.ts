@@ -17,7 +17,6 @@ export type ToolAccess = 'read' | 'write' | 'delete';
 export type ToolOperation =
   | 'passthrough'
   | 'raw-export'
-  | 'nutrition'
   | 'parsed-export'
   /** Reads a downloaded export from disk. Never touches the network. */
   | 'export-list'
@@ -41,6 +40,15 @@ export interface LiveToolDefinition {
 
 const grams = (maximum: number, description: string) =>
   z.number().finite().nonnegative().max(maximum).describe(description);
+
+/**
+ * An amount of food being logged. Zero is refused: a zero-gram serving is a
+ * mistake, not an entry. The floor also keeps the number clear of the exponent
+ * form `1e-05`, which the protocol body was never shown to accept. Mirrors
+ * `_SMALLEST_AMOUNT` in python/live_bridge.py.
+ */
+const amount = (maximum: number, description: string) =>
+  z.number().finite().min(0.001).max(maximum).describe(description);
 
 /**
  * Per-metric bounds, generous enough to accept any unit Cronometer can be
@@ -84,17 +92,64 @@ const withoutConfirm = (input: unknown): JsonObject => {
   return params;
 };
 
-const fastingRangeSchema = z.union([emptyInputSchema, dateRangeSchema]);
+/**
+ * The two either/or inputs below are single objects with a refinement, not
+ * `z.union`s. A top-level union becomes a JSON Schema `anyOf`, which MCP clients
+ * flatten on their own terms: Claude Code turned the fasting union into "provide
+ * at least one of start_date, end_date", which is wrong — no dates at all is the
+ * common call. A plain object says the same thing to every client.
+ */
+const fastingRangeSchema = z
+  .object({
+    start_date: calendarDaySchema
+      .optional()
+      .describe('First date to include. Give both dates or neither.'),
+    end_date: calendarDaySchema.optional().describe('Last date to include. Give both dates or neither.'),
+  })
+  .strict()
+  .superRefine(({ start_date, end_date }, ctx) => {
+    if (start_date === undefined && end_date === undefined) return;
+    if (start_date === undefined || end_date === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [start_date === undefined ? 'start_date' : 'end_date'],
+        message: 'give both start_date and end_date, or neither',
+      });
+      return;
+    }
+    const range = dateRangeSchema.safeParse({ start_date, end_date });
+    if (!range.success) {
+      for (const problem of range.error.issues) {
+        ctx.addIssue({ code: 'custom', path: problem.path, message: problem.message });
+      }
+    }
+  });
 
-const macroTargetReadSchema = z.union([
-  z.object({ all_days: z.literal(true) }).strict(),
-  z
-    .object({
-      all_days: z.literal(false).optional(),
-      date: calendarDaySchema,
-    })
-    .strict(),
-]);
+const macroTargetReadSchema = z
+  .object({
+    all_days: z
+      .boolean()
+      .optional()
+      .describe('true to read the whole weekly schedule instead of one date.'),
+    date: calendarDaySchema.optional().describe('The date to read. Required unless all_days is true.'),
+  })
+  .strict()
+  .superRefine(({ all_days, date }, ctx) => {
+    if (all_days === true && date !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['date'],
+        message: 'give all_days: true or a date, not both',
+      });
+    }
+    if (all_days !== true && date === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['date'],
+        message: 'date is required unless all_days is true',
+      });
+    }
+  });
 
 export const MUTATING_LIVE_METHODS: ReadonlySet<LiveMethod> = new Set([
   'add_food_entry',
@@ -108,7 +163,6 @@ export const MUTATING_LIVE_METHODS: ReadonlySet<LiveMethod> = new Set([
   'add_biometric',
   'remove_biometric',
   'copy_day',
-  'set_day_complete',
   'add_repeat_item',
   'delete_repeat_item',
 ]);
@@ -204,7 +258,7 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
     name: 'cronometer_analyze_export',
     title: 'Analyse a Downloaded Export',
     description:
-      'Coverage-aware nutrition summary from a downloaded export. Prefer this over cronometer_get_nutrition_summary for anything about nutrient adequacy: a downloaded export has one row per meal, so it can tell a missing value apart from a recorded zero and can show where Cronometer summed absent data as zero. The live export is day totals only and cannot. Reports logged intake; it does not diagnose deficiencies.',
+      'Coverage-aware nutrition summary from a downloaded export, and the only nutrient summary this server offers. A downloaded export has one row per meal, so it can tell a missing value apart from a recorded zero and can show where Cronometer summed absent data as zero; the live export is day totals only and cannot. A nutrient `value` is the SUM over the days listed in `days`, not a daily figure. Days in the range with no rows at all are listed in `daysAbsentFromExport` and contribute nothing, so divide by the days you actually mean. Reports logged intake; it does not diagnose deficiencies.',
     access: 'read',
     idempotent: true,
     destructive: false,
@@ -227,30 +281,10 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
       .strict(),
   },
   {
-    name: 'cronometer_get_nutrition_summary',
-    title: 'Get Coverage-Aware Nutrition Summary',
-    description:
-      'Read the daily-summary CSV, preserve missing nutrient cells, and aggregate only when the requested coverage threshold is met. This reports logged intake; it does not diagnose deficiencies.',
-    method: 'export_raw',
-    access: 'read',
-    idempotent: true,
-    destructive: false,
-    operation: 'nutrition',
-    inputSchema: dateRangeSchema.safeExtend({
-      coverage_threshold: z
-        .number()
-        .finite()
-        .gt(0)
-        .max(1)
-        .default(1)
-        .describe('Minimum fraction of diary-group nutrient cells required before a value is returned.'),
-    }),
-  },
-  {
     name: 'cronometer_export_raw',
     title: 'Export Raw Cronometer CSV',
     description:
-      'Read one supported Cronometer CSV export for an explicit range. Large exports are refused rather than silently truncated; request a shorter range.',
+      'Read one supported Cronometer CSV export for an explicit range. Large exports are refused rather than silently truncated; request a shorter range. The daily_summary export from here is Cronometer’s own day totals, which count a missing nutrient as zero, so use cronometer_analyze_export for anything about nutrient coverage.',
     method: 'export_raw',
     access: 'read',
     idempotent: true,
@@ -291,7 +325,7 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
     name: 'cronometer_add_food_entry',
     title: 'Add Food Entry',
     description:
-      'Add one serving to the user’s diary. Use identifiers and measure data returned by food search/details; this changes the account.',
+      'Add one serving to the user’s diary; this changes the account. Take food_id and food_source_id from cronometer_search_foods, pass measure_id 0, and give the real total weight in weight_grams (cronometer_get_food_details lists each measure’s gram weight). The result carries a serving_id: keep it, because it is the only way to remove this entry later from here.',
     method: 'add_food_entry',
     access: 'write',
     idempotent: false,
@@ -301,9 +335,16 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
       .object({
         food_id: positiveIdSchema,
         food_source_id: positiveIdSchema,
-        measure_id: z.number().int().min(0).max(2_147_483_647),
-        quantity: grams(100_000, 'Number of selected measures.'),
-        weight_grams: grams(100_000, 'Total serving weight in grams.'),
+        // Only 0, the universal gram measure. The client packs the diary group into
+        // a measure id's high 16 bits and keeps only the low 16 of what it is given,
+        // so a real measure id such as 1072101 would be sent as a different number.
+        // Refused until that encoding is verified, rather than logged against
+        // whatever the truncated number happens to mean.
+        measure_id: z
+          .literal(0)
+          .describe('Must be 0, the universal gram measure. Other measure ids are not encoded correctly yet.'),
+        quantity: amount(100_000, 'Number of selected measures.'),
+        weight_grams: amount(100_000, 'Total serving weight in grams.'),
         date: calendarDaySchema,
         diary_group: z.number().int().min(1).max(4).describe('Cronometer diary group number, 1 through 4.'),
       })
@@ -312,13 +353,16 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
   {
     name: 'cronometer_remove_food_entry',
     title: 'Delete Food Entry',
-    description: 'Permanently remove one serving from the diary. Read the diary first and verify its serving ID.',
+    description:
+      'Permanently remove one serving from the diary. The serving_id must come from the result of cronometer_add_food_entry: the food log is read from an export that carries no serving IDs, so an entry logged in the app or in an earlier conversation cannot be removed here. In that case ask the user to delete it in the Cronometer app. Never guess an ID.',
     method: 'remove_food_entry',
     access: 'delete',
     idempotent: false,
     destructive: true,
     operation: 'passthrough',
-    inputSchema: deletion({ serving_id: identifierSchema }),
+    inputSchema: deletion({
+      serving_id: identifierSchema.describe('The serving_id returned by cronometer_add_food_entry.'),
+    }),
     toParams: withoutConfirm,
   },
   {
@@ -503,7 +547,8 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
   {
     name: 'cronometer_remove_biometric',
     title: 'Delete Biometric',
-    description: 'Permanently remove one body measurement. Read recent biometrics first and verify its ID.',
+    description:
+      'Permanently remove one body measurement. The biometric_id comes from the result of cronometer_add_biometric, or from cronometer_get_recent_biometrics, which can miss entries; the export-based biometric log carries no IDs. If the entry cannot be found, ask the user to delete it in the Cronometer app. Never guess an ID.',
     method: 'remove_biometric',
     access: 'delete',
     idempotent: false,
@@ -533,17 +578,6 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
       }),
   },
   {
-    name: 'cronometer_set_day_complete',
-    title: 'Set Diary Day Complete',
-    description: 'Mark one diary date complete or incomplete.',
-    method: 'set_day_complete',
-    access: 'write',
-    idempotent: true,
-    destructive: false,
-    operation: 'passthrough',
-    inputSchema: z.object({ date: calendarDaySchema, complete: z.boolean() }).strict(),
-  },
-  {
     name: 'cronometer_get_repeated_items',
     title: 'Get Repeated Foods',
     description:
@@ -570,7 +604,7 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
       .object({
         food_source_id: positiveIdSchema,
         food_id: positiveIdSchema,
-        quantity: grams(100_000, 'Number of servings to repeat.'),
+        quantity: amount(100_000, 'Number of servings to repeat.'),
         food_name: protocolTextSchema(500, 'Food name returned by the food-details tool.'),
         diary_group: z.number().int().min(1).max(4),
         days_of_week: z

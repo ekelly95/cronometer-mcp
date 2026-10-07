@@ -62,6 +62,36 @@ export function parseCalendarDay(raw: string): CalendarDay | undefined {
   return raw as CalendarDay;
 }
 
+function nextCalendarDay(day: CalendarDay): CalendarDay {
+  let year = Number(day.slice(0, 4));
+  let month = Number(day.slice(5, 7));
+  let date = Number(day.slice(8, 10)) + 1;
+  if (date > daysInMonth(year, month)) {
+    date = 1;
+    month += 1;
+  }
+  if (month > 12) {
+    month = 1;
+    year += 1;
+  }
+  const pad = (value: number, width: number): string => String(value).padStart(width, '0');
+  return `${pad(year, 4)}-${pad(month, 2)}-${pad(date, 2)}` as CalendarDay;
+}
+
+/**
+ * Every calendar day from `start` to `end`, inclusive, in order. Empty when `end`
+ * is before `start`. Pure date arithmetic, for the same reason as above: a JS
+ * `Date` would bring the host's timezone along, and around a DST change that can
+ * repeat or skip a day.
+ */
+export function eachCalendarDay(start: CalendarDay, end: CalendarDay): readonly CalendarDay[] {
+  const days: CalendarDay[] = [];
+  for (let day = start; day <= end; day = nextCalendarDay(day)) {
+    days.push(day);
+  }
+  return days;
+}
+
 export function parseLocalTime(raw: string): LocalTime | undefined {
   const match = CLOCK_12H.exec(raw);
   if (match === null) return undefined;

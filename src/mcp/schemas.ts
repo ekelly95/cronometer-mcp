@@ -59,7 +59,7 @@ export const identifierSchema = z
   .min(1)
   .max(64)
   .regex(CRONOMETER_IDENTIFIER)
-  .describe('Cronometer identifier returned by an earlier read tool.');
+  .describe('Cronometer identifier returned by an earlier tool result.');
 
 export function protocolTextSchema(maximum: number, description: string): z.ZodString {
   return z
@@ -318,12 +318,12 @@ export const nutritionOutputSchema = z
   .object({
     ok: z.literal(true),
     /**
-     * Which export this came from, and it matters. A file export carries one row
-     * per meal, so a nutrient's coverage is real and a divergence from
-     * Cronometer's own total can be classified. The live export is pre-aggregated
-     * to day totals, so it can carry neither.
+     * Always a downloaded export. A file export carries one row per meal, so a
+     * nutrient's coverage is real and a divergence from Cronometer's own total can
+     * be classified. The live export is pre-aggregated to day totals and can carry
+     * neither, which is why there is no live nutrition summary.
      */
-    source: z.enum(['cronometer-live-export', 'cronometer-file-export']),
+    source: z.literal('cronometer-file-export'),
     data: z
       .object({
         dateRange: z
@@ -333,7 +333,17 @@ export const nutritionOutputSchema = z
           })
           .strict(),
         coverageThreshold: z.number().gt(0).max(1),
+        /** Days that had rows. Every nutrient `value` is a sum over exactly these. */
         days: z.array(calendarDaySchema),
+        /** Calendar days from `dateRange.start` to `dateRange.end`, inclusive. */
+        daysInRange: z.number().int().positive(),
+        /**
+         * Days inside the range with no rows at all. They add nothing to any sum,
+         * which is the missing-as-zero trap one level up from a nutrient cell: a
+         * week with two unlogged days still sums to a `value`. Listed so that an
+         * average is taken over the days that were actually logged.
+         */
+        daysAbsentFromExport: z.array(calendarDaySchema),
         parseIssues: z.array(parseIssueSchema),
         rowsOutsideRequestedRange: z.number().int().nonnegative(),
         nutrients: z.array(rangeNutrientSchema),

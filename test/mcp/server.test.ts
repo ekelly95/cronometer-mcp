@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/client/stdio';
@@ -160,7 +161,6 @@ const validInput: Readonly<Record<string, JsonObject>> = {
   cronometer_get_exercises: range,
   cronometer_get_biometric_log: range,
   cronometer_get_notes: range,
-  cronometer_get_nutrition_summary: { ...range, coverage_threshold: 1 },
   cronometer_export_raw: { ...range, export_type: 'notes' },
   cronometer_search_foods: { query: 'egg', max_results: 10 },
   cronometer_get_food_details: { food_source_id: 101 },
@@ -201,7 +201,6 @@ const validInput: Readonly<Record<string, JsonObject>> = {
   cronometer_add_biometric: { metric_type: 'weight', value: 80, date: '2026-08-15' },
   cronometer_remove_biometric: { biometric_id: 'bio_10', confirm: true },
   cronometer_copy_day: { source_date: '2026-08-14', destination_date: '2026-08-15' },
-  cronometer_set_day_complete: { date: '2026-08-15', complete: true },
   cronometer_get_repeated_items: {},
   cronometer_add_repeat_item: {
     food_source_id: 101,
@@ -331,7 +330,7 @@ describe('MCP protocol surface', () => {
     ).map((definition) => definition.name);
 
     expect(flagged.sort()).toEqual(changesAccount.sort());
-    expect(flagged.length).toBe(14);
+    expect(flagged.length).toBe(13);
     // The flag must be exactly the boolean true; Claude Code ignores any other value.
     for (const definition of LIVE_TOOL_REGISTRY.filter((d) => d.access !== 'read')) {
       expect(metaFor(definition)).toEqual({ 'anthropic/requiresUserInteraction': true });
@@ -358,8 +357,8 @@ describe('MCP protocol surface', () => {
     const { client } = await connect();
     await client.listTools();
     const result = await client.callTool({
-      name: 'cronometer_get_nutrition_summary',
-      arguments: { ...range, coverage_threshold: 1 },
+      name: 'cronometer_analyze_export',
+      arguments: { folder: 'missing-nutrients', coverage_threshold: 1 },
     });
     const output = result.structuredContent as {
       readonly data: {
@@ -543,9 +542,10 @@ describe('MCP protocol surface', () => {
    * can be classified. The live export is day totals and can do neither.
    */
   describe('analysing a downloaded export', () => {
-    async function connectWithExports(
-      configuration: typeof TEST_CONFIGURATION | typeof NO_EXPORT_CONFIGURATION,
-    ): Promise<Client> {
+    async function connectWithExports(configuration: {
+      readonly timeZone: string;
+      readonly exportDirectory: string | undefined;
+    }): Promise<Client> {
       const server = buildServer({ bridge: new FakeBridge(), configuration });
       const client = new Client({ name: 'export-test', version: '1.0.0' });
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -594,6 +594,76 @@ describe('MCP protocol surface', () => {
       expect(protein?.kind).toBe('value');
     });
 
+    it('reports the export directory without the account name', async () => {
+      const client = await connectWithExports(TEST_CONFIGURATION);
+      const result = await client.callTool({ name: 'cronometer_list_exports', arguments: {} });
+      const data = (result.structuredContent as { data: { exportDirectory: string } }).data;
+      const home = homedir();
+      if (home !== '') expect(data.exportDirectory).not.toContain(home);
+    });
+
+    it('still analyses an export that is missing one nutrient column', async () => {
+      // Nutrient columns are individually optional in the parser. Refusing the
+      // whole analysis over one renamed header would discard the other sixty.
+      const root = mkdtempSync(join(tmpdir(), 'cronometer-export-'));
+      try {
+        const folder = join(root, 'no-omega3');
+        mkdirSync(folder);
+        const full = readFileSync(resolve('test', 'fixtures', 'gold-complete', 'dailysummary.csv'), 'utf8');
+        const lines = full.split('\n');
+        const column = (lines[0] ?? '').split(',').indexOf('Omega-3 (g)');
+        expect(column).toBeGreaterThan(0);
+        const withoutOmega3 = lines
+          .map((line) => {
+            if (line === '') return line;
+            const fields = line.split(',');
+            fields.splice(column, 1);
+            return fields.join(',');
+          })
+          .join('\n');
+        writeFileSync(join(folder, 'dailysummary.csv'), withoutOmega3);
+
+        const client = await connectWithExports({ timeZone: 'America/New_York', exportDirectory: root });
+        const result = await client.callTool({
+          name: 'cronometer_analyze_export',
+          arguments: { folder: 'no-omega3' },
+        });
+        expect(result.isError).not.toBe(true);
+        const data = (
+          result.structuredContent as {
+            data: {
+              parseIssues: { code: string; column?: string }[];
+              nutrients: { nutrient: string; kind: string }[];
+            };
+          }
+        ).data;
+        expect(data.nutrients.find((n) => n.nutrient === 'omega3')?.kind).toBe('insufficient-data');
+        expect(data.nutrients.find((n) => n.nutrient === 'protein')?.kind).toBe('value');
+        expect(data.parseIssues).toContainEqual(
+          expect.objectContaining({ code: 'missing-nutrient-column', column: 'Omega-3 (g)' }),
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('names the days in the range that have no rows, rather than summing them as zero', async () => {
+      const client = await connectWithExports(TEST_CONFIGURATION);
+      const result = await client.callTool({
+        name: 'cronometer_analyze_export',
+        arguments: { folder: 'gold-complete', start_date: '2026-08-13', end_date: '2026-08-17' },
+      });
+      expect(result.isError).not.toBe(true);
+      const data = (
+        result.structuredContent as {
+          data: { days: string[]; daysInRange: number; daysAbsentFromExport: string[] };
+        }
+      ).data;
+      expect(data.days).toEqual(['2026-08-14', '2026-08-15', '2026-08-16']);
+      expect(data.daysInRange).toBe(5);
+      expect(data.daysAbsentFromExport).toEqual(['2026-08-13', '2026-08-17']);
+    });
+
     it('refuses a folder name that could point outside the export directory', async () => {
       const client = await connectWithExports(TEST_CONFIGURATION);
       for (const folder of ['..', '../secrets', 'a/b', 'C:\\Windows']) {
@@ -615,21 +685,74 @@ describe('MCP protocol surface', () => {
     });
   });
 
-  it('tells you the live summary cannot do coverage, instead of returning nothing useful', async () => {
-    // The live daily-summary export has no Group column: one row per day, already
-    // totalled. Returning 61 insufficient-data entries was technically true and
-    // no use to anyone.
-    const liveShaped = 'Date,Energy (kcal),Completed\n2026-08-16,2000.00,false\n';
-    const client = (await connectWithBridge(new FakeBridge({ daily_summary: liveShaped }))).client;
-    const result = await client.callTool({
-      name: 'cronometer_get_nutrition_summary',
-      arguments: { ...range, coverage_threshold: 1 },
-    });
-    const text = result.content.find((part) => part.type === 'text')?.text ?? '';
+  it('offers no tool that can only fail', () => {
+    // The live daily-summary export has no Group column, so a live coverage summary
+    // always refused; and Cronometer removed setDayComplete. Each still cost a call,
+    // and the write still cost an approval prompt, before failing every time.
+    const names = LIVE_TOOL_REGISTRY.map((definition) => definition.name);
+    expect(names).not.toContain('cronometer_get_nutrition_summary');
+    expect(names).not.toContain('cronometer_set_day_complete');
+    expect(MUTATING_LIVE_METHODS.has('set_day_complete' as LiveMethod)).toBe(false);
+  });
 
-    expect(result.isError).toBe(true);
-    expect(text).toContain('no Group column');
-    expect(text).toContain('cronometer_analyze_export');
+  describe('either/or inputs are plain objects', () => {
+    function schemaOf(name: string) {
+      const definition = LIVE_TOOL_REGISTRY.find((candidate) => candidate.name === name);
+      if (definition === undefined) throw new Error(`no tool ${name}`);
+      return definition.inputSchema;
+    }
+
+    it('lists them as an object with no top-level anyOf', async () => {
+      // A top-level anyOf is what Claude Code rewrote into a wrong "provide at
+      // least one of start_date, end_date" hint for fasting history.
+      const { client } = await connect();
+      const { tools } = await client.listTools();
+      for (const name of ['cronometer_get_fasting_history', 'cronometer_get_macro_targets']) {
+        const listed = tools.find((tool) => tool.name === name);
+        expect(listed?.inputSchema.type, name).toBe('object');
+        expect(listed?.inputSchema, name).not.toHaveProperty('anyOf');
+      }
+    });
+
+    it('takes fasting history with both dates or neither', () => {
+      const schema = schemaOf('cronometer_get_fasting_history');
+      expect(schema.safeParse({}).success).toBe(true);
+      expect(schema.safeParse(range).success).toBe(true);
+      expect(schema.safeParse({ start_date: '2026-08-14' }).success).toBe(false);
+      expect(schema.safeParse({ end_date: '2026-08-15' }).success).toBe(false);
+      expect(schema.safeParse({ start_date: '2026-08-15', end_date: '2026-08-14' }).success).toBe(false);
+      expect(schema.safeParse({ start_date: '2025-01-01', end_date: '2026-08-14' }).success).toBe(false);
+    });
+
+    it('takes macro targets for one date or for all days, not both or neither', () => {
+      const schema = schemaOf('cronometer_get_macro_targets');
+      expect(schema.safeParse({ all_days: true }).success).toBe(true);
+      expect(schema.safeParse({ date: '2026-08-15' }).success).toBe(true);
+      expect(schema.safeParse({ all_days: false, date: '2026-08-15' }).success).toBe(true);
+      expect(schema.safeParse({}).success).toBe(false);
+      expect(schema.safeParse({ all_days: false }).success).toBe(false);
+      expect(schema.safeParse({ all_days: true, date: '2026-08-15' }).success).toBe(false);
+    });
+  });
+
+  it('logs food only by the gram measure, and never a zero amount', () => {
+    const schema = LIVE_TOOL_REGISTRY.find(({ name }) => name === 'cronometer_add_food_entry')
+      ?.inputSchema;
+    const valid = validInput['cronometer_add_food_entry'];
+    expect(schema?.safeParse(valid).success).toBe(true);
+    // The client keeps only the low 16 bits of a measure id, so this one would be
+    // sent as a different number.
+    expect(schema?.safeParse({ ...valid, measure_id: 1072101 }).success).toBe(false);
+    expect(schema?.safeParse({ ...valid, quantity: 0 }).success).toBe(false);
+    expect(schema?.safeParse({ ...valid, weight_grams: 0 }).success).toBe(false);
+  });
+
+  it('tells the model where a deletable serving id comes from', () => {
+    // The food log is an export with no serving ids, so "read the diary first"
+    // sent the model looking for something that is not there.
+    const remove = LIVE_TOOL_REGISTRY.find(({ name }) => name === 'cronometer_remove_food_entry');
+    expect(remove?.description).toContain('cronometer_add_food_entry');
+    expect(remove?.description).not.toContain('Read the diary first');
   });
 
   it('strips confirmation before dispatching a deletion', async () => {
@@ -736,6 +859,29 @@ describe('MCP protocol surface', () => {
     expect(result.isError).toBe(true);
     expect(text).toContain('2 MB response limit');
     expect(text).toContain('no data was truncated');
+  });
+
+  it('leaves URLs in an error readable', async () => {
+    // The drive-letter rule used to match the `s:/` in `https://`.
+    const bridge: LiveCaller = {
+      async call(): Promise<LiveResult> {
+        throw new Error('404 Client Error: Not Found for url: https://cronometer.com/export?[query removed]');
+      },
+      async close(): Promise<void> {},
+    };
+    const server = buildServer({ bridge, configuration: TEST_CONFIGURATION });
+    const client = new Client({ name: 'url-test', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    connections.push({ client, server });
+    await client.listTools();
+
+    const result = await client.callTool({ name: 'cronometer_status', arguments: {} });
+    const text = result.content.find((part) => part.type === 'text')?.text ?? '';
+    expect(result.isError).toBe(true);
+    expect(text).toContain('https://cronometer.com/export');
+    expect(text).not.toContain('[local path]');
   });
 
   it('redacts credentials and local paths from tool errors', async () => {

@@ -13,6 +13,12 @@ export type ExportFileName = (typeof EXPORT_FILE_NAMES)[number];
 export type ParseIssueCode =
   /** A column the file must have was not in its header. */
   | 'missing-column'
+  /**
+   * One nutrient column was not in the daily summary's header. Not fatal: that
+   * nutrient reads as Missing everywhere and the other sixty are unaffected. Kept
+   * apart from `missing-column` so a caller can refuse on the one and not the other.
+   */
+  | 'missing-nutrient-column'
   /** The row has a different number of fields than the header. */
   | 'field-count'
   /** A quoted field was never closed; everything from there on is unreadable. */

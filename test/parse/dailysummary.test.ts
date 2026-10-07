@@ -176,8 +176,11 @@ describe('an export missing a nutrient column', () => {
       .join('\n');
 
     const parsed = parseDailySummary(withoutOmega3);
-    const absences = parsed.issues.filter((i) => i.code === 'missing-column');
+    const absences = parsed.issues.filter((i) => i.code === 'missing-nutrient-column');
     expect(absences).toHaveLength(1);
+    // Not the fatal code: a caller that refuses on `missing-column` must not
+    // refuse a file over one nutrient.
+    expect(parsed.issues.filter((i) => i.code === 'missing-column')).toEqual([]);
     expect(absences[0]?.column).toBe('Omega-3 (g)');
 
     expect(parsed.rows).toHaveLength(3);

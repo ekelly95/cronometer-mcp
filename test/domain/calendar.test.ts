@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compareLocalTime,
+  eachCalendarDay,
   minutesFromMidnight,
   parseCalendarDay,
   parseLocalTime,
@@ -24,6 +25,45 @@ describe('calendar days', () => {
     ['2026-08-16 ', 'trailing whitespace'],
   ])('rejects %o — %s', (raw) => {
     expect(parseCalendarDay(raw)).toBeUndefined();
+  });
+});
+
+describe('calendar day ranges', () => {
+  const day = (raw: string) => {
+    const parsed = parseCalendarDay(raw);
+    if (parsed === undefined) throw new Error(`not a day: ${raw}`);
+    return parsed;
+  };
+
+  it('is inclusive at both ends', () => {
+    expect(eachCalendarDay(day('2026-08-14'), day('2026-08-16'))).toEqual([
+      '2026-08-14',
+      '2026-08-15',
+      '2026-08-16',
+    ]);
+  });
+
+  it('crosses month, leap-day and year boundaries', () => {
+    expect(eachCalendarDay(day('2024-02-28'), day('2024-03-01'))).toEqual([
+      '2024-02-28',
+      '2024-02-29',
+      '2024-03-01',
+    ]);
+    expect(eachCalendarDay(day('2026-12-31'), day('2027-01-01'))).toEqual([
+      '2026-12-31',
+      '2027-01-01',
+    ]);
+  });
+
+  it('does not repeat or skip a day across a DST change', () => {
+    // 2026-03-08 and 2026-11-01 are the US clock changes.
+    expect(eachCalendarDay(day('2026-03-07'), day('2026-03-09'))).toHaveLength(3);
+    expect(eachCalendarDay(day('2026-10-31'), day('2026-11-02'))).toHaveLength(3);
+  });
+
+  it('is empty when the range is backwards, and one day when it is a single day', () => {
+    expect(eachCalendarDay(day('2026-08-16'), day('2026-08-15'))).toEqual([]);
+    expect(eachCalendarDay(day('2026-08-16'), day('2026-08-16'))).toEqual(['2026-08-16']);
   });
 });
 
