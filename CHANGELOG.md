@@ -37,6 +37,8 @@ published releases; `package.json` stays at `0.1.0`.
 
 ### Fixed
 - `setup-remote.ps1` no longer lets a Node warning end up in the stored password hash.
+- Stopping the remote connector's scheduled task now stops its server. Windows had left
+  the Node process running and holding the port, so the next start failed.
 - Documentation drift: the tool count, the loopback redirect for Claude Code, the
   seven-day window for detecting refresh-token reuse, and README checkout paths.
 
