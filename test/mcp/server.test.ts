@@ -14,9 +14,9 @@ import {
   annotationsFor,
   buildServer,
   metaFor,
-  outputSchemaFor,
   type LiveCaller,
 } from '../../src/mcp/index.js';
+import { outputSchemaFor } from '../../src/mcp/server.js';
 
 function fixture(directory: string, file: string): string {
   return readFileSync(resolve('test', 'fixtures', directory, file), 'utf8');
