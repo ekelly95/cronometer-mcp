@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +30,14 @@ describe('remote connector log', () => {
     // One write past the limit at most, and the newest line is in the current file.
     expect(readFileSync(path, 'utf8').length).toBeLessThan(200 + 100);
     expect(readFileSync(path, 'utf8')).toContain('line 19');
+  });
+
+  it('rotates a log that was already over the limit when the server started', () => {
+    const path = logPath();
+    writeFileSync(path, 'x'.repeat(500));
+    createLogger(path, 200)('first line after a restart');
+    expect(readFileSync(`${path}.1`, 'utf8')).toBe('x'.repeat(500));
+    expect(readFileSync(path, 'utf8')).toContain('first line after a restart');
   });
 
   it('redacts the credentials before a line reaches the file', () => {

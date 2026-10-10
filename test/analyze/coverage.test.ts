@@ -135,9 +135,82 @@ describe('the data path cannot silently default missing data to zero', () => {
   // arithmetic: a `?? 0` in a parser or in the MCP layer invents data just as well.
   const directories = ['analyze', 'domain', 'parse', 'mcp'];
 
-  /** Comments may quote the forbidden patterns to explain them; code may not. */
-  const withoutComments = (source: string): string =>
-    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  /**
+   * Comments and string text may quote the forbidden patterns to explain them;
+   * code may not. A scanner rather than a regex, so that a `/*` inside a string
+   * cannot swallow the code after it, and code inside `${…}` is still checked.
+   */
+  function codeOnly(source: string): string {
+    let out = '';
+    // One entry per `${…}` currently open: how many `{` deep within it.
+    const interpolations: number[] = [];
+    let i = 0;
+
+    const skipQuoted = (quote: string): void => {
+      i += 1;
+      while (i < source.length && source[i] !== quote && source[i] !== '\n') {
+        i += source[i] === '\\' ? 2 : 1;
+      }
+      i += 1;
+      out += quote + quote;
+    };
+    // From just inside a template's text to its closing backtick or next `${`.
+    const skipTemplateText = (): void => {
+      while (i < source.length) {
+        if (source[i] === '\\') {
+          i += 2;
+        } else if (source[i] === '`') {
+          i += 1;
+          out += '`';
+          return;
+        } else if (source[i] === '$' && source[i + 1] === '{') {
+          i += 2;
+          out += '${';
+          interpolations.push(0);
+          return;
+        } else {
+          i += 1;
+        }
+      }
+      // A quote can only lose its place until the end of its line, but a template
+      // that never closes would hide the rest of the file and check nothing.
+      throw new Error('the scanner reached the end of the file inside a template literal');
+    };
+
+    while (i < source.length) {
+      const c = source[i]!;
+      const next = source[i + 1];
+      if (c === '/' && next === '/') {
+        while (i < source.length && source[i] !== '\n') i += 1;
+      } else if (c === '/' && next === '*') {
+        const end = source.indexOf('*/', i + 2);
+        i = end === -1 ? source.length : end + 2;
+        out += ' ';
+      } else if (c === "'" || c === '"') {
+        skipQuoted(c);
+      } else if (c === '`') {
+        i += 1;
+        out += '`';
+        skipTemplateText();
+      } else if (c === '}' && interpolations.at(-1) === 0) {
+        interpolations.pop();
+        i += 1;
+        out += '}';
+        skipTemplateText();
+      } else {
+        if (interpolations.length > 0 && (c === '{' || c === '}')) {
+          const depth = interpolations.pop()!;
+          interpolations.push(c === '{' ? depth + 1 : depth - 1);
+        }
+        out += c;
+        i += 1;
+      }
+    }
+    if (interpolations.length > 0) {
+      throw new Error('the scanner reached the end of the file inside a template interpolation');
+    }
+    return out;
+  }
 
   const forbidden = [/\?\?\s*0(?![.\d])/, /\|\|\s*0(?![.\d])/, /Number\([^)]*\)\s*\|\|\s*0/];
 
@@ -145,17 +218,26 @@ describe('the data path cannot silently default missing data to zero', () => {
     const files = readdirSync(join(src, directory)).filter((name) => name.endsWith('.ts'));
     expect(files.length).toBeGreaterThan(0);
     for (const name of files) {
-      const code = withoutComments(readFileSync(join(src, directory, name), 'utf8'));
+      const code = codeOnly(readFileSync(join(src, directory, name), 'utf8'));
       for (const pattern of forbidden) {
         expect(code, `${directory}/${name}`).not.toMatch(pattern);
       }
     }
   });
 
-  it('strips comments without hiding code', () => {
-    expect(withoutComments('const x = cell ?? 0;')).toMatch(forbidden[0]!);
-    expect(withoutComments('/** quoting `?? 0` */\n// and `|| 0`')).not.toMatch(forbidden[0]!);
-    expect(withoutComments('// and `|| 0`')).not.toMatch(forbidden[1]!);
+  it('ignores comments and string text without hiding code', () => {
+    const [nullish, or] = forbidden as [RegExp, RegExp, RegExp];
+    expect(codeOnly('const x = cell ?? 0;')).toMatch(nullish);
+    expect(codeOnly('/** quoting `?? 0` */\n// and `|| 0`')).not.toMatch(nullish);
+    expect(codeOnly('const x = 1; // a trailing `|| 0`')).not.toMatch(or);
+    expect(codeOnly("const message = 'never write ?? 0';")).not.toMatch(nullish);
+    // A comment opener inside a string must not swallow the code after it.
+    expect(codeOnly("const glob = '*/*.csv';\nconst x = cell ?? 0; /* note */")).toMatch(nullish);
+    // Code inside a template interpolation is still code.
+    expect(codeOnly('const label = `${cell ?? 0} g`;')).toMatch(nullish);
+    expect(codeOnly('const label = `${{ a: 1 }.a} then ${cell || 0}`;')).toMatch(or);
+    // Losing its place must fail loudly, not pass by checking nothing.
+    expect(() => codeOnly('const a = `never closed;\nconst x = cell ?? 0;')).toThrow();
   });
 });
 

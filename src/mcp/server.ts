@@ -19,6 +19,10 @@ import {
 import type { JsonObject } from '../live/index.js';
 import { LiveBridge, redactSecrets, type LiveResult } from '../live/index.js';
 import {
+  BIOMETRICS_COLUMNS,
+  EXERCISES_COLUMNS,
+  NOTES_COLUMNS,
+  SERVINGS_COLUMNS,
   parseBiometrics,
   parseExportSet,
   parseExercises,
@@ -187,24 +191,33 @@ function missingColumns(issues: readonly ParseIssue[]): string[] {
 }
 
 /**
+ * The columns each raw export must have: the same ones its parser requires. The
+ * live daily summary has no Group column (DATA_MODEL.md §7b), so this project's
+ * downloaded-export parser would refuse it; its date column is the one thing the
+ * two files share.
+ */
+const RAW_EXPORT_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  servings: SERVINGS_COLUMNS,
+  exercises: EXERCISES_COLUMNS,
+  biometrics: BIOMETRICS_COLUMNS,
+  notes: NOTES_COLUMNS,
+  daily_summary: ['Date'],
+};
+
+/**
  * The raw export is returned as text, but it must still be the file it claims to
  * be. A login page or an error body would otherwise travel to the model as "your
- * servings export". Only the header is checked; rows are the caller's to read.
+ * servings export". Only the header line is read; rows are the caller's to read,
+ * and a year of servings is not worth parsing just to discard.
  */
 function checkRawExport(exportType: unknown, text: string): void {
-  let missing: string[];
-  if (exportType === 'daily_summary') {
-    // The live daily summary has no Group column (DATA_MODEL.md §7b), so this
-    // project's downloaded-export parser would refuse it. Its date column is the
-    // one thing both files share.
-    const header = readCsv(text).header?.fields ?? [];
-    missing = header.includes('Date') ? [] : ['Date'];
-  } else if (typeof exportType === 'string' && exportType in EXPORT_PARSERS) {
-    const kind = exportType as ParsedExportKind;
-    missing = missingColumns(EXPORT_PARSERS[kind](text, `live:${EXPORT_FILES[kind]}`).issues);
-  } else {
+  const required = typeof exportType === 'string' ? RAW_EXPORT_COLUMNS[exportType] : undefined;
+  if (required === undefined) {
     throw new Error('Validated export type was unexpectedly unknown');
   }
+  const newline = text.indexOf('\n');
+  const header = readCsv(newline === -1 ? text : text.slice(0, newline)).header?.fields ?? [];
+  const missing = required.filter((column) => !header.includes(column));
   if (missing.length > 0) {
     throw new Error(
       `Cronometer's ${String(exportType)} export is missing the ${missing.join(', ')} column(s), so what came back is not that export. Nothing is being returned.`,

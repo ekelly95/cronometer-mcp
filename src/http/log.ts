@@ -5,14 +5,11 @@ import { redactSecrets } from '../live/index.js';
 /** One previous log is kept; past this size the current one becomes it. */
 const MAXIMUM_LOG_BYTES = 5 * 1024 * 1024;
 
-function rotateIfFull(path: string, maximumBytes: number): void {
+function currentSize(path: string): number {
   try {
-    if (existsSync(path) && statSync(path).size > maximumBytes) {
-      renameSync(path, `${path}.1`);
-    }
+    return existsSync(path) ? statSync(path).size : 0;
   } catch {
-    // A failed rotation must not cost the line being written; the append below
-    // either succeeds into the oversized file or falls back to stderr.
+    return 0;
   }
 }
 
@@ -24,8 +21,10 @@ function rotateIfFull(path: string, maximumBytes: number): void {
  * appended there instead. Every line is redacted on the way out, because a log
  * file outlives the process that wrote it.
  *
- * The size is checked on every write, not only at startup: the logon task runs
- * for weeks, and a check that happens once per boot is no limit at all.
+ * The size is tracked on every write, not only checked at startup: the logon
+ * task runs for weeks, and a check that happens once per boot is no limit at
+ * all. It is counted in memory from one stat at startup, so a write costs no
+ * extra filesystem call.
  */
 export function createLogger(
   path: string | undefined,
@@ -36,6 +35,7 @@ export function createLogger(
       process.stderr.write(redactSecrets(text.endsWith('\n') ? text : `${text}\n`));
     };
   }
+  let size = currentSize(path);
   return (text) => {
     const lines = text
       .split(/\r?\n/)
@@ -43,9 +43,18 @@ export function createLogger(
       .map((line) => `${new Date().toISOString()} ${redactSecrets(line)}\n`)
       .join('');
     if (lines === '') return;
-    rotateIfFull(path, maximumBytes);
+    if (size > maximumBytes) {
+      try {
+        renameSync(path, `${path}.1`);
+        size = 0;
+      } catch {
+        // A failed rotation must not cost the line being written; it goes into
+        // the oversized file instead, and rotation is tried again next time.
+      }
+    }
     try {
       appendFileSync(path, lines, { encoding: 'utf8', mode: 0o600 });
+      size += Buffer.byteLength(lines, 'utf8');
     } catch {
       process.stderr.write(lines);
     }
