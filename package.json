@@ -1,5 +1,5 @@
 {
-  "name": "cronometer-mcp-next",
+  "name": "cronometer-personal",
   "version": "0.1.0",
   "private": true,
   "description": "Personal local MCP server for coverage-aware Cronometer analysis and explicit live account access.",
@@ -15,6 +15,7 @@
     "build": "tsc -p tsconfig.build.json",
     "pretest": "npm run build",
     "start": "node dist/mcp/main.js",
+    "start:http": "node dist/http/main.js",
     "test": "vitest run",
     "test:python": "node scripts/run-python-tests.mjs",
     "test:setup": "node scripts/run-setup-tests.mjs",

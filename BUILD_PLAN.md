@@ -122,6 +122,10 @@ nutritional findings.
 
 ## M3 — Isolated live client
 
+> **Status, 2026-10-09.** The client is no longer a pinned dependency: it was vendored on
+> 2026-08-17 into `python/vendor/cronometer_client.py`, with every change from upstream
+> numbered in its header. The plan below is kept as written.
+
 Use the pinned MIT `cronometer-mcp==2.0.3` client through a narrow Python JSON-lines
 bridge. Keep the TypeScript process in charge of MCP permissions and nutrition semantics.
 
@@ -146,6 +150,13 @@ bridge. Keep the TypeScript process in charge of MCP permissions and nutrition s
 ---
 
 ## M4 — Unified MCP server
+
+> **Status, 2026-10-09.** Two tools listed below no longer exist. The coverage-aware
+> nutrition summary over the live export was removed: that export is already collapsed to
+> day totals, so it could only refuse (DATA_MODEL.md §7b). Coverage comes from
+> `cronometer_analyze_export` over a downloaded export instead. "Mark a day
+> complete/incomplete" was removed after Cronometer dropped `setDayComplete`. `copy_day`
+> now also requires `confirm: true`, and the server has 31 tools and one prompt.
 
 Build one stdio server on protocol `2026-07-28` via `serveStdio()`. Zod schemas emit JSON
 Schema 2020-12. The live export feeds the M1 parser and M2 coverage analysis, so convenience
@@ -208,7 +219,10 @@ holds up against multi-month data.
 These remain outside the personal tool:
 
 - Browser automation, mobile endpoint reverse engineering, or arbitrary/raw GWT execution.
-- HTTP transport or remote/multi-user deployment.
+- Multi-user or hosted deployment. *(A single-user remote connector over HTTP was added
+  on 2026-10-07 so the Claude iPhone app can use the server; it is opt-in, listens on
+  loopback behind Tailscale Funnel, and is gated by an owner password. See `REMOTE.md`
+  and §12 of the security audit.)*
 - Code Mode or any sandboxed code execution.
 - Telemetry, crash reporting, or usage analytics.
 - Food-database lookups (USDA/Open Food Facts) — a later milestone, not v1.

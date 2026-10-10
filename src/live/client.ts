@@ -197,6 +197,10 @@ export class LiveBridge {
 
     this.#child = undefined;
     this.#stdoutBuffer = '';
+    // The exit handler ignores a child that is no longer current, so without this
+    // a call still in flight would wait out its whole timeout for an answer that
+    // can no longer arrive.
+    this.#failAll(new LiveBridgeError('Live connector was closed before it answered'));
     child.stdin.end();
     await new Promise<void>((resolveClose) => {
       if (child.exitCode !== null) {

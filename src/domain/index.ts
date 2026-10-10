@@ -43,3 +43,16 @@ export type {
   NoteEntry,
   ServingEntry,
 } from './entries.js';
+
+export type {
+  RadarGroup,
+  RadarSpokeDefinition,
+  ReferenceBasis,
+  ReferenceProfile,
+} from './reference-intakes.js';
+export {
+  ESSENTIAL_NUTRIENTS_NOT_IN_EXPORT,
+  RADAR_SPOKES,
+  REFERENCE_SOURCE,
+  referenceAmount,
+} from './reference-intakes.js';

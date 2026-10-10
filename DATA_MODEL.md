@@ -251,6 +251,11 @@ nothing. Decode as UTF-8 explicitly.
    filed under `Breakfast`.
 3. `fasts.csv` field formats and in-progress representation.
 4. Multi-day, multi-month export behaviour — row ordering, any per-day header repetition.
+   *Partial evidence only (noted 2026-10-09):* one real downloaded `dailysummary.csv` day
+   has been analysed (README, "On a real day from this account"). Its group rows summed
+   exactly to Cronometer's `Total` for energy and protein, and 45 of 61 nutrients showed
+   the missing-summed-as-zero pattern. That confirms the per-day layout
+   on real data; it says nothing yet about ordering or headers across many days.
 5. Custom diary group names.
 6. Metric-account unit strings.
 7. `Completed = 'true'` representation.

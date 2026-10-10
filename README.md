@@ -11,7 +11,7 @@ It provides full live access supported by the pinned client: food diary reads an
 - This is an unofficial personal tool. Cronometer does not provide or support this interface. A Cronometer website change can break it without warning, and automated access may put the account at risk. Read Cronometer’s current [Terms of Service](https://mobile.cronometer.com/terms/) before enabling it.
 - Some CSV export features may require Cronometer Gold. Cronometer documents its supported manual export flow in [Account Settings: Data Export](https://support.cronometer.com/hc/en-us/articles/360018760151-Account-Settings).
 - This reports what was logged and how complete the record is. It is not a medical device, does not diagnose nutrient deficiencies, and does not provide medical advice.
-- Keep it local. The project deliberately has no HTTP server, remote deployment mode, telemetry, or arbitrary code-execution tool.
+- Local by default. The stdio server is what Codex, Claude Code and Claude Desktop start. An **opt-in remote connector** serves the same tools over HTTPS behind a single-user OAuth sign-in so the Claude iPhone app can use them — see [REMOTE.md](REMOTE.md). It listens on loopback only and is published deliberately through Tailscale Funnel. There is still no hosted or multi-user deployment, telemetry, or arbitrary code-execution tool.
 
 ## What makes the nutrition summary safer
 
@@ -51,7 +51,7 @@ Nutrient cells are also read strictly. A cell must be empty or a plain non-negat
 Open PowerShell and run:
 
 ```powershell
-Set-Location C:\dev\cronometer
+Set-Location C:\path\to\cronometer-personal-mcp   # wherever you cloned this repository
 .\scripts\setup-windows.ps1
 ```
 
@@ -89,7 +89,7 @@ Cronometer offers the same data two ways, and they are not equivalent:
 
 Coverage works by comparing meals. If Lunch's omega-3 cell is blank while Breakfast reads `0.00`, that is a database gap, not a zero intake. The live export has already collapsed those meals into one number — and that number is precisely the one that counted the blanks as zero. So there is no live nutrition summary. There used to be a `cronometer_get_nutrition_summary` tool, but against the real live export it could only ever refuse, so it was removed rather than left to cost a call and an error every time.
 
-Two things about reading the result. A nutrient's `value` is the **sum** over the days listed in `days`, not a daily figure. And a day inside the requested range that has no rows at all adds nothing to that sum — the same missing-as-zero trap one level up — so those days are listed in `daysAbsentFromExport`, with `daysInRange` beside them. Average over the days that were actually logged.
+Two things about reading the result. A nutrient's `value` is the **sum** over the days listed in `days`, not a daily figure. And a day inside the requested range that has no rows at all adds nothing to that sum — the same missing-as-zero trap one level up — so those days are listed in `daysAbsentFromExport`, with `daysInRange` beside them. Average over the days that were actually logged. A range with no rows at all is refused, rather than answered with sixty-one empty nutrients.
 
 If a future export drops or renames a single nutrient column, the analysis still runs: that nutrient comes back as insufficient data with a `missing-nutrient-column` issue, and the other sixty are unaffected. Only a missing `Date`, `Group` or `Completed` column stops it.
 
@@ -152,6 +152,8 @@ because serving IDs are not readable back from the export), `set_macro_targets` 
 `set_macro_schedule_day` (Cronometer computes recommended targets from your profile and
 setting these overrides that calculation — not something to do as a test), and the two
 fasting tools (there is no create-fast tool, so there is nothing to delete or cancel).
+Because `copy_day` cannot be undone as a batch, it is marked destructive and requires
+`confirm: true`, like the deletions.
 
 ## Write safety
 
@@ -164,6 +166,7 @@ Approval works differently in each client, so here is exactly what you get where
 | **Claude Code** | Each of the 13 account-changing tools carries `anthropic/requiresUserInteraction`, so it prompts on **every** call — including under `acceptEdits`, `auto`, and `bypassPermissions` — and no allow rule can skip it | The server itself. Nothing to set up. Needs Claude Code 2.1.199 or later |
 | **Codex** | `default_tools_approval_mode = "writes"`, so every tool not marked read-only prompts | The setup script, in Codex's `config.toml` |
 | **Claude Desktop** | Desktop's own tool-approval prompt | Claude Desktop |
+| **Claude web and mobile** (remote connector) | Each tool's permission on the connector page: set writes and deletes to *Needs approval* | You, in claude.ai — see [REMOTE.md](REMOTE.md) |
 
 The Claude Code case is the strong one, because the requirement travels with the tool rather than living in a config file you might change later. The others depend on client configuration: the setup script sets Codex's, and tells you loudly if it could not. Older Claude Code versions ignore the flag and fall back to their normal permission handling, as do other MCP clients — an unknown `_meta` key is harmless, which is why it is sent unconditionally.
 
@@ -180,7 +183,7 @@ The setup normally offers to do this. If you skipped it, the command contains on
 Codex:
 
 ```powershell
-codex mcp add cronometer-personal -- pwsh -NoProfile -ExecutionPolicy Bypass -File C:\dev\cronometer\scripts\run-mcp.ps1
+codex mcp add cronometer-personal -- pwsh -NoProfile -ExecutionPolicy Bypass -File C:\path\to\cronometer-personal-mcp\scripts\run-mcp.ps1
 ```
 
 Then add this line inside the new `[mcp_servers.cronometer-personal]` section of `%USERPROFILE%\.codex\config.toml`:
@@ -192,7 +195,7 @@ default_tools_approval_mode = "writes"
 Claude Code, available to the Windows user in every project:
 
 ```powershell
-claude mcp add --scope user cronometer-personal -- pwsh -NoProfile -ExecutionPolicy Bypass -File C:\dev\cronometer\scripts\run-mcp.ps1
+claude mcp add --scope user cronometer-personal -- pwsh -NoProfile -ExecutionPolicy Bypass -File C:\path\to\cronometer-personal-mcp\scripts\run-mcp.ps1
 ```
 
 Claude Desktop has no registration command. Add this to the `mcpServers` object in `%APPDATA%\Claude\claude_desktop_config.json`, keeping any servers already there, then restart Desktop:
@@ -200,7 +203,7 @@ Claude Desktop has no registration command. Add this to the `mcpServers` object 
 ```json
 "cronometer-personal": {
   "command": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-  "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\dev\\cronometer\\scripts\\run-mcp.ps1"]
+  "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\path\\to\\cronometer-personal-mcp\\scripts\\run-mcp.ps1"]
 }
 ```
 
@@ -218,12 +221,26 @@ Packaging this as a Desktop Extension (`.mcpb`/`.dxt`) would remove the hand-edi
 - Calls are serialized, dates and identifiers are validated twice, and any tool result over 2 MB is refused rather than silently truncated — ask for a shorter date range.
 - Food names, notes, website errors, and all other live text are returned inside an explicit untrusted-data boundary, JSON-encoded so that the text cannot forge the end of that boundary. They must never be treated as instructions.
 
+## Micronutrient radar
+
+The server also offers one MCP prompt, `nutrient_radar`, which hosts show as a command. In Claude Code it is `/mcp__cronometer-personal__nutrient_radar`, and in Claude Desktop it is in the attachment menu. It averages the last 7 days of your newest downloaded export (by default) and renders an interactive React radar chart as an artifact. Optional arguments: `folder`, `end_date`, `days` (1–31) and `profile` (`adult-male` or `adult-female`).
+
+The numbers come from `cronometer_nutrient_radar`, which does every average and percentage, so the chart does not rely on the model's arithmetic for any of them. One conversion is still left to the model: the prompt has it read your latest logged weight and convert pounds to kilograms before passing it in.
+
+- **31 spokes.** 12 vitamins, 10 minerals and the 9 essential amino acids. Methionine and phenylalanine are paired with cystine and tyrosine, because the WHO requirement is defined for those sums. Biotin, choline, chloride, chromium, fluoride, iodine and molybdenum have references, but `dailysummary.csv` has no column for them, so the result lists them as absent.
+- **References are population figures, not your Cronometer targets.** Vitamins and minerals use the US DRIs for adults aged 31–50, and amino acids use WHO/FAO/UNU 2007 mg/kg. The prompt reads your latest logged weight for the amino-acid references. If no weight is logged, those spokes have no reference rather than a guessed one.
+- **Averages divide by logged days.** The tool lists unlogged days in the window rather than counting them as zero.
+- **Incomplete coverage is drawn as a floor.** If any diary group lacked a nutrient, its spoke carries only `atLeast…` values and is drawn as a dashed "at least" series, not as intake.
+- **No data is drawn as nothing.** A nutrient no diary group recorded in the window — usually because its column is missing from the export — is a `no-data` spoke with no number at all, and the column is named in `nutrientColumnsMissingFromExport`. A floor of 0% would read as "ate none".
+
+It needs a downloaded export for the same reason as the coverage analysis: the live daily summary has no per-meal rows, so it cannot tell missing data from a zero.
+
 ## Useful tools
 
-The 30 MCP tools are grouped conceptually as follows:
+The 31 MCP tools are grouped conceptually as follows:
 
 - Connection: status and connection check.
-- Downloaded exports: list them, and run the coverage-aware nutrient analysis over one. These read a folder on this computer and never touch the network.
+- Downloaded exports: list them, run the coverage-aware nutrient analysis over one, and average a window of days into micronutrient radar data. These read a folder on this computer and never touch the network.
 - Diary: food log, exercise, biometric history, notes, raw CSV export, add/remove food, and copy a day.
 - Food database: search and food details.
 - Macros: read targets/schedules, set daily targets, list/create/delete templates, and assign a template to a weekday.
@@ -231,7 +248,7 @@ The 30 MCP tools are grouped conceptually as follows:
 - Biometrics: read recent values, add a value, and delete a value.
 - Repeated foods: list, add, and delete rules.
 
-There is intentionally no arbitrary GWT request tool, browser automation, raw SQL, shell execution, automatic background sync, or remote HTTP transport.
+There is intentionally no arbitrary GWT request tool, browser automation, raw SQL, shell execution, or automatic background sync. The one HTTP transport is the opt-in, single-user remote connector in [REMOTE.md](REMOTE.md).
 
 ## Development verification
 
@@ -241,9 +258,9 @@ All tests are offline and use synthetic data:
 npm run verify      # typecheck, TypeScript, Python, and the setup scripts
 ```
 
-That is 464 TypeScript tests, 52 Python and 27 setup checks. The individual steps are `npm run typecheck`, `npm test`, `npm run test:python` and `npm run test:setup`; the last skips itself loudly where PowerShell is absent, rather than failing for a reason unrelated to the code being checked.
+That is 535 TypeScript tests, 66 Python and 35 setup checks. The individual steps are `npm run typecheck`, `npm test`, `npm run test:python` and `npm run test:setup`; the last skips itself loudly where PowerShell is absent, rather than failing for a reason unrelated to the code being checked.
 
-`npm test` builds first and checks both legacy MCP and the modern `2026-07-28` stdio handshake. The protocol suite calls every tool against a fake bridge, verifies tool permission labels, checks that every destructive tool refuses an unconfirmed call, ensures read handlers cannot reach mutation methods, and drives hostile multi-line text through both the success and error paths to prove neither can forge the end of the untrusted-data boundary.
+`npm test` builds first and checks both legacy MCP and the modern `2026-07-28` stdio handshake. The protocol suite calls every tool against a fake bridge, verifies tool permission labels, checks that every destructive tool refuses an unconfirmed call, ensures read handlers cannot reach mutation methods, and drives hostile multi-line text through both the success and error paths to prove neither can forge the end of the untrusted-data boundary. The remote connector's suite (`test/http`) runs the whole OAuth sign-in in-process — registration, PKCE, lockout, refresh rotation and reuse revocation — and then both protocol eras over Streamable HTTP with the issued token.
 
 Two honest limits on what those tests show. The generic output schema deliberately types `data` as unknown, because the shape of a live response is Cronometer's to decide — so "validates against the output schema" is a real check only for the export analysis and the parsed diary reads, which are the tools with a fully specified result. And every test is offline: they prove the wrapper behaves, not that the undocumented interface still works.
 

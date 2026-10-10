@@ -16,6 +16,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'setup-windows.ps1') -InternalFunctionsOnly
+. (Join-Path $PSScriptRoot 'setup-remote.ps1') -InternalFunctionsOnly
 
 $script:Failures = 0
 $script:Checks = 0
@@ -186,6 +187,33 @@ try {
     Remove-Item -LiteralPath $alias -Force
     Assert-That 'with the alias turned off, the Store path is kept rather than inventing one' (
         (Resolve-StablePowerShellPath -Source $storeBuild -LocalAppData $workspace -WarningAction SilentlyContinue) -eq $storeBuild)
+
+    # ---------------------------------------------------------------- 8
+    $workspace = New-Workspace 'The remote connector URL comes from the Tailscale name, normalised once'
+    Assert-That 'the trailing DNS dot is dropped and the path added' (
+        (ConvertTo-PublicUrl 'My-PC.tail1234.ts.net.') -eq 'https://my-pc.tail1234.ts.net/mcp')
+    $refusedUrl = $false
+    try { ConvertTo-PublicUrl 'https://my-pc.tail1234.ts.net/mcp' | Out-Null } catch { $refusedUrl = $true }
+    Assert-That 'a URL typed where a host name belongs is refused' $refusedUrl
+    $status = '{ "Self": { "DNSName": "my-pc.tail1234.ts.net.", "HostName": "my-pc" } }'
+    Assert-That 'the MagicDNS name is read from tailscale status' (
+        (Get-TailscaleHostName -StatusJson $status) -eq 'my-pc.tail1234.ts.net')
+    Assert-That 'a status without a DNS name gives nothing rather than guessing' (
+        $null -eq (Get-TailscaleHostName -StatusJson '{ "Self": { "DNSName": "" } }'))
+    Assert-That 'unreadable status gives nothing' ($null -eq (Get-TailscaleHostName -StatusJson 'not json'))
+
+    $remote = New-RemoteConfiguration -PublicUrl 'https://my-pc.tail1234.ts.net/mcp' -OwnerPasswordHash 'scrypt$32768$8$1$s$k' -ListenPort 8787
+    $roundTrip = $remote | ConvertTo-Json | ConvertFrom-Json
+    Assert-That 'the saved configuration is what the launcher validates' (
+        $roundTrip.version -eq 1 -and $roundTrip.listen_port -is [long] -and $roundTrip.owner_password_hash.StartsWith('scrypt$'))
+    $refusedHash = $false
+    try { New-RemoteConfiguration -PublicUrl 'https://x.ts.net/mcp' -OwnerPasswordHash 'hunter2' -ListenPort 8787 | Out-Null } catch { $refusedHash = $true }
+    Assert-That 'a plaintext password is never saved in place of the hash' $refusedHash
+
+    # ---------------------------------------------------------------- 9
+    $workspace = New-Workspace 'The launcher accepts only the two transports it knows'
+    & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'run-mcp.ps1') -Transport bogus *> $null
+    Assert-That 'an unknown transport is refused before anything is read' ($LASTEXITCODE -ne 0)
 } finally {
     Write-Host ""
     if ($script:Failures -eq 0) {

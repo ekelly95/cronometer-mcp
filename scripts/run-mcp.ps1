@@ -1,13 +1,24 @@
 [CmdletBinding()]
-param()
+param(
+    # stdio is the local server every MCP client launches. http is the remote
+    # connector for Claude's hosted apps, started once and left running; see REMOTE.md.
+    [ValidateSet('stdio', 'http')]
+    [string]$Transport = 'stdio'
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$entryPoint = Join-Path $projectRoot 'dist\mcp\main.js'
+$entryPoint = if ($Transport -eq 'http') {
+    Join-Path $projectRoot 'dist\http\main.js'
+} else {
+    Join-Path $projectRoot 'dist\mcp\main.js'
+}
 $dataDirectory = Join-Path $env:LOCALAPPDATA 'CronometerPersonalMcp'
 $configurationPath = Join-Path $dataDirectory 'live-config.json'
+$remoteDirectory = Join-Path $dataDirectory 'remote'
+$remoteConfigurationPath = Join-Path $remoteDirectory 'remote-config.json'
 
 if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
     throw 'Cronometer MCP is not built. Run scripts\setup-windows.ps1 first.'
@@ -79,6 +90,33 @@ if ([string]::IsNullOrEmpty($plainPassword)) {
     throw 'The saved Cronometer password could not be decrypted for this Windows account.'
 }
 
+$remote = $null
+if ($Transport -eq 'http') {
+    if (-not (Test-Path -LiteralPath $remoteConfigurationPath -PathType Leaf)) {
+        throw 'The remote connector is not configured. Run scripts\setup-remote.ps1 first.'
+    }
+    # The remote directory sits inside the protected one and inherits its ACL. A rule
+    # added to it directly would bypass the check above, so it is checked too.
+    foreach ($rule in (Get-Acl -LiteralPath $remoteDirectory).Access) {
+        $identity = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier])
+        if ($identity -ne $currentUser) {
+            throw "The remote connector directory grants access to $($rule.IdentityReference): $remoteDirectory. Remove that permission or delete the directory and re-run scripts\setup-remote.ps1."
+        }
+    }
+    $remote = Get-Content -LiteralPath $remoteConfigurationPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (
+        $remote.version -ne 1 -or
+        $remote.public_url -isnot [string] -or
+        -not $remote.public_url.StartsWith('https://') -or
+        $remote.owner_password_hash -isnot [string] -or
+        -not $remote.owner_password_hash.StartsWith('scrypt$') -or
+        # Parenthesised: PowerShell gives -and and -or the same precedence.
+        (($remote.listen_port -isnot [long]) -and ($remote.listen_port -isnot [int]))
+    ) {
+        throw 'The saved remote connector configuration is invalid. Re-run scripts\setup-remote.ps1.'
+    }
+}
+
 $exitCode = 1
 try {
     $env:CRONOMETER_LIVE_ENABLED = '1'
@@ -93,6 +131,17 @@ try {
     $env:CRONOMETER_EXPORT_DIR = Join-Path $dataDirectory 'exports'
     $env:CRONOMETER_PYTHON = Join-Path $projectRoot '.venv-live\Scripts\python.exe'
 
+    if ($null -ne $remote) {
+        # Its own Cronometer session file, so the local server and the remote one
+        # never rewrite the same .session.json underneath each other.
+        $env:CRONOMETER_DATA_DIR = Join-Path $remoteDirectory 'cronometer'
+        $env:MCP_STATE_DIR = Join-Path $remoteDirectory 'oauth'
+        $env:MCP_PUBLIC_URL = $remote.public_url
+        $env:MCP_OWNER_PASSWORD_HASH = $remote.owner_password_hash
+        $env:MCP_LISTEN_PORT = [string]$remote.listen_port
+        $env:MCP_LOG_FILE = Join-Path $remoteDirectory 'server.log'
+    }
+
     & node $entryPoint
     $exitCode = $LASTEXITCODE
 } finally {
@@ -104,6 +153,11 @@ try {
     Remove-Item Env:CRONOMETER_DATA_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:CRONOMETER_EXPORT_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:CRONOMETER_PYTHON -ErrorAction SilentlyContinue
+    Remove-Item Env:MCP_STATE_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:MCP_PUBLIC_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:MCP_OWNER_PASSWORD_HASH -ErrorAction SilentlyContinue
+    Remove-Item Env:MCP_LISTEN_PORT -ErrorAction SilentlyContinue
+    Remove-Item Env:MCP_LOG_FILE -ErrorAction SilentlyContinue
 }
 
 exit $exitCode
