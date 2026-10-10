@@ -63,7 +63,8 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv publishes no moving major tag, so this names an exact release.
+      - uses: astral-sh/setup-uv@v10.2.0
 
       - name: Locked Python environment
         run: |
