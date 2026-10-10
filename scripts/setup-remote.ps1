@@ -132,9 +132,15 @@ try {
         throw 'The two passwords did not match. Nothing was written.'
     }
     # Piped, not passed as an argument: arguments are visible to every process on the machine.
-    $hash = ($firstText | & node $hasher 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0) {
-        throw $hash
+    # stderr is captured with stdout but kept apart from it: a Node warning on a
+    # successful run would otherwise become part of the stored hash.
+    # Scoped Continue: under Stop, Windows PowerShell turns any stderr line into a throw.
+    $output = & { $ErrorActionPreference = 'Continue'; @($firstText | & node $hasher 2>&1) }
+    $exitCode = $LASTEXITCODE
+    $errors = ($output | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | Out-String).Trim()
+    $hash = ($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | Out-String).Trim()
+    if ($exitCode -ne 0) {
+        throw $(if ($errors -ne '') { $errors } else { $hash })
     }
 } finally {
     $firstText = $null

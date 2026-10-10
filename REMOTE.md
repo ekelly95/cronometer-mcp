@@ -103,10 +103,13 @@ available to whoever completes the sign-in. What stands in the way:
   long and use it nowhere else. After five wrong attempts in fifteen minutes, sign-in is
   refused for everyone, including you, until the fifteen minutes pass.
 - **Only Claude can be a client.** Registration accepts only Claude's own callback
-  addresses, so a sign-in can never send a code anywhere else.
+  addresses on claude.ai and claude.com, plus an `http://localhost/callback` (or
+  `127.0.0.1`) address on any port, which is how Claude Code on this machine signs in.
+  A sign-in can never send a code anywhere else.
 - **Tokens expire and rotate.** Access tokens last an hour. Refresh tokens rotate on every
-  use and lapse after 30 days unused; a stolen one replayed later revokes the whole
-  connection. Only hashes are stored on disk.
+  use and lapse after 30 days unused. A spent refresh token presented again within the
+  following seven days revokes the whole connection; after that it is simply refused as
+  unknown. Only hashes are stored on disk.
 - **Loopback only.** The server binds to `127.0.0.1`; Funnel is the only way in, and it
   rejects any request whose `Host` is not your public name.
 

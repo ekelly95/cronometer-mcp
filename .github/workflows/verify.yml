@@ -2,9 +2,10 @@
 #
 # This runs the typecheck and the TypeScript suite — the parsers, the coverage
 # analysis, the MCP surface, the untrusted-data boundary, and the setup helpers the
-# two platforms share. It does not run the Python bridge tests: those need a `uv`
-# virtual environment, and a workflow that is awkward to keep green is a workflow
-# people learn to ignore. `npm run verify` locally remains the complete check.
+# two platforms share — and the Python bridge tests, in the same hash-locked `uv`
+# environment the setup scripts build. What it cannot run is anything live: no job
+# here has Cronometer credentials, by design. `npm run verify` locally remains the
+# complete check.
 #
 # The macOS job exists because this project claims macOS support it cannot fully
 # prove. The parts that are pure code — the Claude Desktop config writer, the
@@ -49,6 +50,28 @@ jobs:
       - name: Windows setup tests
         if: runner.os == 'Windows'
         run: npm run test:setup
+
+  python:
+    # The vendored client's parsers and the bridge's input validation. These run
+    # without network access to Cronometer; the lock file is installed with
+    # --require-hashes exactly as the setup scripts do.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - uses: astral-sh/setup-uv@v10
+
+      - name: Locked Python environment
+        run: |
+          uv venv .venv-live --python 3.12
+          uv pip sync python/requirements-live.lock --python .venv-live/bin/python --require-hashes
+
+      - name: Python tests
+        run: npm run test:python
 
   shell:
     # The shell scripts are authored on Windows and cannot be run there. shellcheck is

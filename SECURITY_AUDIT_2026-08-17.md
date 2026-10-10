@@ -620,7 +620,8 @@ the change, at the same time, to record what the change does to the threat model
 Read it as the design's own account of itself, and weigh it accordingly.
 
 §2 listed "network transport" as an explicit non-goal. That has changed on purpose: an
-opt-in remote connector (`src/http/`, `REMOTE.md`) now serves the same 30 tools over
+opt-in remote connector (`src/http/`, `REMOTE.md`) now serves the same 30 tools (31 since the nutrient radar was added — corrected
+2026-10-09) over
 Streamable HTTP so that Claude's hosted apps — the iPhone app in particular — can use
 them. Those apps reach a connector only from Anthropic's cloud, so the server has to be
 reachable from the public internet. The stdio server is unchanged, and nothing about the

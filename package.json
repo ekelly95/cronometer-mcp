@@ -1,5 +1,5 @@
 {
-  "name": "cronometer-mcp-next",
+  "name": "cronometer-personal",
   "version": "0.1.0",
   "private": true,
   "description": "Personal local MCP server for coverage-aware Cronometer analysis and explicit live account access.",
