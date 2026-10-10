@@ -214,6 +214,57 @@ try {
     $workspace = New-Workspace 'The launcher accepts only the two transports it knows'
     & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'run-mcp.ps1') -Transport bogus *> $null
     Assert-That 'an unknown transport is refused before anything is read' ($LASTEXITCODE -ne 0)
+
+    # ---------------------------------------------------------------- 10
+    # Stop-ScheduledTask kills the launcher's PowerShell process and nothing else.
+    # This does the same — Stop-Process, which is TerminateProcess — to a PowerShell
+    # that started Node the way run-mcp.ps1 does, and looks for the Node afterwards.
+    Write-Host ""
+    Write-Host 'Killing the launcher also ends the server it started'
+
+    function Wait-For {
+        param([Parameter(Mandatory)] [scriptblock]$Condition, [int]$Seconds = 20)
+        $deadline = (Get-Date).AddSeconds($Seconds)
+        while ((Get-Date) -lt $deadline) {
+            $value = & $Condition
+            if ($value) { return $value }
+            Start-Sleep -Milliseconds 200
+        }
+        return $null
+    }
+
+    function Test-ServerOutlivesLauncher {
+        param([Parameter(Mandatory)] [bool]$KillOnClose)
+        $command = if ($KillOnClose) {
+            ". '$(Join-Path $PSScriptRoot 'kill-on-close.ps1')'; " +
+            "Invoke-TiedToThisProcess -FilePath node -ArgumentList '-e', 'setInterval(() => {}, 1e9)'"
+        } else {
+            "& node -e 'setInterval(() => {}, 1e9)'"
+        }
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+        $launcher = Start-Process pwsh -ArgumentList '-NoProfile', '-EncodedCommand', $encoded -PassThru -WindowStyle Hidden
+        $server = Wait-For {
+            Get-CimInstance Win32_Process -Filter "ParentProcessId=$($launcher.Id) AND Name='node.exe'"
+        }
+        if ($null -eq $server) {
+            Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue
+            throw 'the stand-in launcher never started Node'
+        }
+        Stop-Process -Id $launcher.Id -Force
+        $gone = Wait-For { $null -eq (Get-Process -Id $server.ProcessId -ErrorAction SilentlyContinue) } -Seconds 10
+        if (-not $gone) {
+            Stop-Process -Id $server.ProcessId -Force -ErrorAction SilentlyContinue
+            return $true
+        }
+        return $false
+    }
+
+    Assert-That 'without the job object the server outlives its launcher (the bug, so the check below can see it)' (
+        Test-ServerOutlivesLauncher -KillOnClose $false)
+    Assert-That 'with it, killing the launcher ends the server too' (
+        -not (Test-ServerOutlivesLauncher -KillOnClose $true))
+    Assert-That 'the launcher enables it for the remote connector' (
+        (Get-Content -Raw (Join-Path $PSScriptRoot 'run-mcp.ps1')) -match 'Invoke-TiedToThisProcess -FilePath ''node'' -ArgumentList \$entryPoint')
 } finally {
     Write-Host ""
     if ($script:Failures -eq 0) {

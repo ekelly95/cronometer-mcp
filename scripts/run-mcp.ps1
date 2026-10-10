@@ -142,8 +142,16 @@ try {
         $env:MCP_LOG_FILE = Join-Path $remoteDirectory 'server.log'
     }
 
-    & node $entryPoint
-    $exitCode = $LASTEXITCODE
+    if ($null -ne $remote) {
+        # Stop-ScheduledTask ends only this PowerShell process, and Windows leaves its
+        # children running: the old server kept the port and the next start failed.
+        # The stdio server needs none of this — it exits when its client closes stdin.
+        . (Join-Path $PSScriptRoot 'kill-on-close.ps1')
+        $exitCode = Invoke-TiedToThisProcess -FilePath 'node' -ArgumentList $entryPoint
+    } else {
+        & node $entryPoint
+        $exitCode = $LASTEXITCODE
+    }
 } finally {
     $plainPassword = $null
     Remove-Item Env:CRONOMETER_PASSWORD -ErrorAction SilentlyContinue
