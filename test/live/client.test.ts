@@ -97,6 +97,19 @@ describe('LiveBridge', () => {
     );
   });
 
+  it('fails a call still in flight when it is closed, instead of leaving it to time out', async () => {
+    const instance = bridge(30_000);
+    const pending = instance.call('status', { delay: 10_000 });
+    const outcome = expect(pending).rejects.toThrow(/closed before it answered/);
+    // Long enough for the request to be written to the helper.
+    await new Promise((resolvePause) => setTimeout(resolvePause, 300));
+
+    const started = Date.now();
+    await instance.close();
+    await outcome;
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
   it('stops an oversized reply once the line is complete', async () => {
     const instance = bridge(2_000, 64);
     await expect(instance.call('status', { oversized: true })).rejects.toThrow(

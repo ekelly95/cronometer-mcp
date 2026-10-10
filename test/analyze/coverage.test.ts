@@ -115,25 +115,47 @@ describe('multi-day coverage', () => {
     expect(relaxed.coverage.groups.ratio).toBe(0.75);
   });
 
+  it('labels a day with a Total row and no groups as no-groups, not unexplained', () => {
+    const totalOnly = oneNutrientDay('protein', [], 42);
+    const day = aggregateDay(totalOnly).nutrients.protein;
+    expect(day.kind).toBe('insufficient-data');
+    expect(day.comparison).toEqual(expect.objectContaining({ kind: 'no-groups', reportedTotal: 42 }));
+  });
+
   it('rejects thresholds that could turn no data into a value', () => {
     expect(() => aggregateRange([], 0)).toThrow(RangeError);
     expect(() => aggregateRange([], 1.01)).toThrow(RangeError);
   });
 });
 
-describe('the analysis layer cannot silently default missing data to zero', () => {
+describe('the data path cannot silently default missing data to zero', () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const sourceDir = join(here, '..', '..', 'src', 'analyze');
+  const src = join(here, '..', '..', 'src');
+  // Everything a cell passes through on its way to the model, not only the
+  // arithmetic: a `?? 0` in a parser or in the MCP layer invents data just as well.
+  const directories = ['analyze', 'domain', 'parse', 'mcp'];
 
-  it('contains none of the numeric-default patterns this project forbids', () => {
-    const source = readdirSync(sourceDir)
-      .filter((name) => name.endsWith('.ts'))
-      .map((name) => readFileSync(join(sourceDir, name), 'utf8'))
-      .join('\n');
+  /** Comments may quote the forbidden patterns to explain them; code may not. */
+  const withoutComments = (source: string): string =>
+    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-    expect(source).not.toMatch(/\?\?\s*0/);
-    expect(source).not.toMatch(/\|\|\s*0/);
-    expect(source).not.toMatch(/Number\([^)]*\)\s*\|\|\s*0/);
+  const forbidden = [/\?\?\s*0(?![.\d])/, /\|\|\s*0(?![.\d])/, /Number\([^)]*\)\s*\|\|\s*0/];
+
+  it.each(directories)('src/%s contains none of the numeric-default patterns this project forbids', (directory) => {
+    const files = readdirSync(join(src, directory)).filter((name) => name.endsWith('.ts'));
+    expect(files.length).toBeGreaterThan(0);
+    for (const name of files) {
+      const code = withoutComments(readFileSync(join(src, directory, name), 'utf8'));
+      for (const pattern of forbidden) {
+        expect(code, `${directory}/${name}`).not.toMatch(pattern);
+      }
+    }
+  });
+
+  it('strips comments without hiding code', () => {
+    expect(withoutComments('const x = cell ?? 0;')).toMatch(forbidden[0]!);
+    expect(withoutComments('/** quoting `?? 0` */\n// and `|| 0`')).not.toMatch(forbidden[0]!);
+    expect(withoutComments('// and `|| 0`')).not.toMatch(forbidden[1]!);
   });
 });
 

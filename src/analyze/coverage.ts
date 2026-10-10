@@ -22,6 +22,8 @@ export type TotalComparisonKind =
   | 'matches'
   | 'rounding'
   | 'missing-as-zero'
+  /** The day has a Total row but no diary group, so there is nothing to compare it with. */
+  | 'no-groups'
   | 'unexplained';
 
 interface TotalComparisonBase {
@@ -149,6 +151,9 @@ function compareReportedTotal(
     delta,
   };
 
+  if (nutrientCoverage.total === 0) {
+    return { kind: 'no-groups', ...common };
+  }
   if (nutrientCoverage.withData < nutrientCoverage.total) {
     return { kind: 'missing-as-zero', ...common };
   }

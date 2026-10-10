@@ -20,7 +20,9 @@ export type ToolOperation =
   | 'parsed-export'
   /** Reads a downloaded export from disk. Never touches the network. */
   | 'export-list'
-  | 'export-analysis';
+  | 'export-analysis'
+  /** Averages a downloaded export into reference-relative radar spokes. Never touches the network. */
+  | 'nutrient-radar';
 
 export interface LiveToolDefinition {
   readonly name: string;
@@ -83,7 +85,7 @@ const deletion = <T extends z.ZodRawShape>(shape: T) =>
       ...shape,
       confirm: z
         .literal(true)
-        .describe('Must be true. Confirm only after the user directly requested this deletion.'),
+        .describe('Must be true. Confirm only after the user directly requested this change.'),
     })
     .strict();
 
@@ -281,6 +283,34 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
       .strict(),
   },
   {
+    name: 'cronometer_nutrient_radar',
+    title: 'Micronutrient Radar Data',
+    description:
+      'Daily averages of 31 essential vitamins, minerals and amino acids from a downloaded export, each set against a general adult reference intake, shaped for a radar chart. Covers the `days` days ending at end_date (default: the export’s last day, 7 days). Averages divide by days that have rows, listed in `daysLogged`; unlogged days are in `daysAbsentFromExport`. A spoke where any diary group lacked the nutrient is `incomplete` and carries only an at-least floor. Amino-acid references scale with body weight, so pass body_weight_kg or they have none. References are population figures, not personal targets; this reports logged intake and does not diagnose deficiencies.',
+    access: 'read',
+    idempotent: true,
+    destructive: false,
+    operation: 'nutrient-radar',
+    inputSchema: z
+      .object({
+        folder: exportFolderSchema,
+        end_date: calendarDaySchema.optional().describe('Last day to include. Defaults to the export’s last day.'),
+        days: z.number().int().min(1).max(31).default(7).describe('How many days, ending at end_date, to average.'),
+        profile: z
+          .enum(['adult-male', 'adult-female'])
+          .default('adult-male')
+          .describe('Which adult reference intakes (ages 31–50) to compare against.'),
+        body_weight_kg: z
+          .number()
+          .finite()
+          .min(20)
+          .max(400)
+          .optional()
+          .describe('Body weight in kilograms, for the per-kg amino-acid references. Convert pounds first (× 0.45359237).'),
+      })
+      .strict(),
+  },
+  {
     name: 'cronometer_export_raw',
     title: 'Export Raw Cronometer CSV',
     description:
@@ -346,7 +376,7 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
         quantity: amount(100_000, 'Number of selected measures.'),
         weight_grams: amount(100_000, 'Total serving weight in grams.'),
         date: calendarDaySchema,
-        diary_group: z.number().int().min(1).max(4).describe('Cronometer diary group number, 1 through 4.'),
+        diary_group: z.number().int().min(1).max(4).describe('Diary group number, 1 through 4 (by default Breakfast, Lunch, Dinner, Snacks). A fifth or custom group cannot be used from here; log those in the Cronometer app.'),
       })
       .strict(),
   },
@@ -560,22 +590,23 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
   {
     name: 'cronometer_copy_day',
     title: 'Copy Diary Day',
-    description: 'Copy all diary entries from one date to another date. This can create many new entries.',
+    description:
+      'Copy every diary entry from one date onto another, adding to what the destination already has. This can create many entries at once, and nothing here can undo it as a batch — each copy would have to be removed one by one, so it requires confirm: true.',
     method: 'copy_day',
     access: 'write',
     idempotent: false,
-    destructive: false,
+    destructive: true,
     operation: 'passthrough',
-    inputSchema: z
-      .object({
-        source_date: calendarDaySchema,
-        destination_date: calendarDaySchema,
-      })
-      .strict()
-      .refine(({ source_date, destination_date }) => source_date !== destination_date, {
-        message: 'source_date and destination_date must be different',
-        path: ['destination_date'],
-      }),
+    // Not a delete, but not reversible from here either, so it is confirmed like
+    // one. See cronometer_cancel_active_fast.
+    inputSchema: deletion({
+      source_date: calendarDaySchema,
+      destination_date: calendarDaySchema,
+    }).refine(({ source_date, destination_date }) => source_date !== destination_date, {
+      message: 'source_date and destination_date must be different',
+      path: ['destination_date'],
+    }),
+    toParams: withoutConfirm,
   },
   {
     name: 'cronometer_get_repeated_items',
@@ -606,7 +637,7 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
         food_id: positiveIdSchema,
         quantity: amount(100_000, 'Number of servings to repeat.'),
         food_name: protocolTextSchema(500, 'Food name returned by the food-details tool.'),
-        diary_group: z.number().int().min(1).max(4),
+        diary_group: z.number().int().min(1).max(4).describe('Diary group number, 1 through 4 (by default Breakfast, Lunch, Dinner, Snacks). A fifth or custom group cannot be used from here; log those in the Cronometer app.'),
         days_of_week: z
           .array(z.number().int().min(0).max(6))
           .min(1)

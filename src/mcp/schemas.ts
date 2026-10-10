@@ -137,7 +137,7 @@ const comparisonBase = {
 
 export const totalComparisonSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('not-reported'), ...comparisonBase }).strict(),
-  ...(['matches', 'rounding', 'missing-as-zero', 'unexplained'] as const).map((kind) =>
+  ...(['matches', 'rounding', 'missing-as-zero', 'no-groups', 'unexplained'] as const).map((kind) =>
     z
       .object({
         kind: z.literal(kind),
@@ -355,3 +355,67 @@ export const nutritionOutputSchema = z
 export type ExportListOutput = z.infer<typeof exportListOutputSchema>;
 export type GenericOutput = z.infer<typeof genericOutputSchema>;
 export type NutritionOutput = z.infer<typeof nutritionOutputSchema>;
+
+const radarSpokeBase = {
+  id: z.string().min(1),
+  label: z.string().min(1),
+  group: z.enum(['vitamins', 'minerals', 'essentialAminoAcids']),
+  unit: z.string().min(1),
+  reference: z
+    .object({ amount: z.number().positive(), basis: z.enum(['RDA', 'AI', 'WHO-2007']) })
+    .strict()
+    .nullable(),
+  coverage: z.object({ groups: coverageSchema, days: coverageSchema }).strict(),
+};
+
+/**
+ * One spoke of the radar. `incomplete` carries only floors, under names that say
+ * so, and no `dailyAverage` — a chart reading this cannot draw a lower bound as
+ * an intake without first renaming the field. `no-data` carries no number at all.
+ */
+export const radarSpokeSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('measured'),
+      dailyAverage: z.number().nonnegative(),
+      percentOfReference: z.number().nonnegative().nullable(),
+      ...radarSpokeBase,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('incomplete'),
+      atLeastDailyAverage: z.number().nonnegative(),
+      atLeastPercentOfReference: z.number().nonnegative().nullable(),
+      ...radarSpokeBase,
+    })
+    .strict(),
+  z.object({ kind: z.literal('no-data'), ...radarSpokeBase }).strict(),
+]);
+
+export const radarOutputSchema = z
+  .object({
+    ok: z.literal(true),
+    source: z.literal('cronometer-file-export'),
+    data: z
+      .object({
+        dateRange: z.object({ start: calendarDaySchema, end: calendarDaySchema }).strict(),
+        daysInRange: z.number().int().positive(),
+        /** The divisor of every average. */
+        daysLogged: z.array(calendarDaySchema),
+        daysAbsentFromExport: z.array(calendarDaySchema),
+        profile: z.enum(['adult-male', 'adult-female']),
+        /** Null means the amino-acid spokes have no reference, not a reference of zero. */
+        bodyWeightKg: z.number().positive().nullable(),
+        referenceSource: z.string(),
+        essentialNutrientsNotInExport: z.array(z.string()),
+        parseIssueCount: z.number().int().nonnegative(),
+        /** Columns Cronometer's export normally has but this file lacks. */
+        nutrientColumnsMissingFromExport: z.array(z.string()),
+        spokes: z.array(radarSpokeSchema),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type RadarOutput = z.infer<typeof radarOutputSchema>;

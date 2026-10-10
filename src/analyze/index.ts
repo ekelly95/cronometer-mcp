@@ -20,3 +20,5 @@ export {
   aggregateDay,
   aggregateRange,
 } from './coverage.js';
+export type { IncompleteSpoke, MeasuredSpoke, NutrientRadar, RadarSpoke } from './radar.js';
+export { buildNutrientRadar } from './radar.js';

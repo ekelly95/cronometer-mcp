@@ -14,6 +14,7 @@ import {
   annotationsFor,
   buildServer,
   metaFor,
+  outputSchemaFor,
   type LiveCaller,
 } from '../../src/mcp/index.js';
 
@@ -200,7 +201,7 @@ const validInput: Readonly<Record<string, JsonObject>> = {
   cronometer_get_recent_biometrics: {},
   cronometer_add_biometric: { metric_type: 'weight', value: 80, date: '2026-08-15' },
   cronometer_remove_biometric: { biometric_id: 'bio_10', confirm: true },
-  cronometer_copy_day: { source_date: '2026-08-14', destination_date: '2026-08-15' },
+  cronometer_copy_day: { source_date: '2026-08-14', destination_date: '2026-08-15', confirm: true },
   cronometer_get_repeated_items: {},
   cronometer_add_repeat_item: {
     food_source_id: 101,
@@ -213,6 +214,7 @@ const validInput: Readonly<Record<string, JsonObject>> = {
   cronometer_delete_repeat_item: { repeat_item_id: 9, confirm: true },
   cronometer_list_exports: {},
   cronometer_analyze_export: { folder: 'missing-nutrients', coverage_threshold: 1 },
+  cronometer_nutrient_radar: { folder: 'gold-complete', body_weight_kg: 70 },
 };
 
 
@@ -348,6 +350,10 @@ describe('MCP protocol surface', () => {
       });
       expect(result.isError, definition.name).not.toBe(true);
       expect(result.structuredContent, definition.name).toMatchObject({ ok: true });
+      // Checked here, not left to the SDK: if a tool lost its outputSchema, the SDK
+      // would have nothing to validate against and the line above would still pass.
+      const checked = outputSchemaFor(definition).safeParse(result.structuredContent);
+      expect(checked.success, `${definition.name}: ${checked.error?.message ?? ''}`).toBe(true);
       const text = result.content.find((part) => part.type === 'text');
       expect(text?.text, definition.name).toContain('UNTRUSTED CRONOMETER DATA');
     }
@@ -479,6 +485,33 @@ describe('MCP protocol surface', () => {
       expect(result.isError).toBe(true);
       expect(text).toContain('Amount');
       expect(text).toContain('indistinguishable from an empty diary');
+    });
+
+    it('does not pass off a page that is not an export as the raw export', async () => {
+      const loginPage = '<!DOCTYPE html>\n<html><body>Please sign in</body></html>\n';
+      const connection = await connectWithBridge(
+        new FakeBridge({ ...EXPORTS, servings: loginPage, daily_summary: loginPage }),
+      );
+      for (const export_type of ['servings', 'daily_summary']) {
+        const result = await connection.client.callTool({
+          name: 'cronometer_export_raw',
+          arguments: { ...range, export_type },
+        });
+        const text = result.content.find((part) => part.type === 'text')?.text ?? '';
+        expect(result.isError, export_type).toBe(true);
+        expect(text, export_type).toContain('is not that export');
+        expect(text, export_type).not.toContain('Please sign in');
+      }
+    });
+
+    it('accepts the live daily summary, which has no Group column', async () => {
+      const live = 'Date,Energy (kcal),Protein (g)\n2026-08-14,2000.00,100.00\n';
+      const connection = await connectWithBridge(new FakeBridge({ ...EXPORTS, daily_summary: live }));
+      const result = await connection.client.callTool({
+        name: 'cronometer_export_raw',
+        arguments: { ...range, export_type: 'daily_summary' },
+      });
+      expect(result.isError).not.toBe(true);
     });
 
     it('reads an empty diary as empty, which is not the same as unreadable', async () => {
@@ -664,6 +697,105 @@ describe('MCP protocol surface', () => {
       expect(data.daysAbsentFromExport).toEqual(['2026-08-13', '2026-08-17']);
     });
 
+    it('averages the radar over the days that were logged in its window', async () => {
+      const client = await connectWithExports(TEST_CONFIGURATION);
+      const result = await client.callTool({
+        name: 'cronometer_nutrient_radar',
+        arguments: { folder: 'gold-complete', end_date: '2026-08-17', days: 7 },
+      });
+      expect(result.isError).not.toBe(true);
+      const data = (
+        result.structuredContent as {
+          data: {
+            dateRange: { start: string; end: string };
+            daysLogged: string[];
+            daysAbsentFromExport: string[];
+            bodyWeightKg: number | null;
+            spokes: { group: string; reference: unknown }[];
+          };
+        }
+      ).data;
+      expect(data.dateRange).toEqual({ start: '2026-08-11', end: '2026-08-17' });
+      expect(data.daysLogged).toEqual(['2026-08-14', '2026-08-15', '2026-08-16']);
+      expect(data.daysAbsentFromExport).toEqual([
+        '2026-08-11',
+        '2026-08-12',
+        '2026-08-13',
+        '2026-08-17',
+      ]);
+      expect(data.bodyWeightKg).toBeNull();
+      expect(data.spokes).toHaveLength(31);
+    });
+
+    it('refuses a radar window with no diary days instead of drawing an empty week', async () => {
+      const client = await connectWithExports(TEST_CONFIGURATION);
+      const result = await client.callTool({
+        name: 'cronometer_nutrient_radar',
+        arguments: { folder: 'gold-complete', end_date: '2026-09-30' },
+      });
+      const text = result.content.find((part) => part.type === 'text')?.text ?? '';
+      expect(result.isError).toBe(true);
+      expect(text).toContain('has no diary days between 2026-09-24 and 2026-09-30');
+    });
+
+    it('refuses an analysis window with no diary days, as the radar does', async () => {
+      // Answering `ok` with sixty-one insufficient-data nutrients and no days is
+      // correct, and reads exactly like an empty diary.
+      const client = await connectWithExports(TEST_CONFIGURATION);
+      const result = await client.callTool({
+        name: 'cronometer_analyze_export',
+        arguments: { folder: 'gold-complete', start_date: '2026-09-01', end_date: '2026-09-07' },
+      });
+      const text = result.content.find((part) => part.type === 'text')?.text ?? '';
+      expect(result.isError).toBe(true);
+      expect(text).toContain('has no diary days between 2026-09-01 and 2026-09-07');
+    });
+
+    it('draws a nutrient absent from the export as no data, not as zero intake', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'cronometer-export-'));
+      try {
+        const folder = join(root, 'no-selenium');
+        mkdirSync(folder);
+        const full = readFileSync(resolve('test', 'fixtures', 'gold-complete', 'dailysummary.csv'), 'utf8');
+        const lines = full.split('\n');
+        const column = (lines[0] ?? '').split(',').indexOf('Selenium (µg)');
+        expect(column).toBeGreaterThan(0);
+        writeFileSync(
+          join(folder, 'dailysummary.csv'),
+          lines
+            .map((line) => {
+              if (line === '') return line;
+              const fields = line.split(',');
+              fields.splice(column, 1);
+              return fields.join(',');
+            })
+            .join('\n'),
+        );
+
+        const client = await connectWithExports({ timeZone: 'America/New_York', exportDirectory: root });
+        const result = await client.callTool({
+          name: 'cronometer_nutrient_radar',
+          arguments: { folder: 'no-selenium', body_weight_kg: 70 },
+        });
+        expect(result.isError).not.toBe(true);
+        const data = (
+          result.structuredContent as {
+            data: {
+              nutrientColumnsMissingFromExport: string[];
+              spokes: Record<string, unknown>[];
+            };
+          }
+        ).data;
+        expect(data.nutrientColumnsMissingFromExport).toEqual(['Selenium (µg)']);
+        const selenium = data.spokes.find((spoke) => spoke['id'] === 'selenium');
+        expect(selenium).toMatchObject({ kind: 'no-data' });
+        expect(selenium).not.toHaveProperty('atLeastPercentOfReference');
+        expect(selenium).not.toHaveProperty('percentOfReference');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it('refuses a folder name that could point outside the export directory', async () => {
       const client = await connectWithExports(TEST_CONFIGURATION);
       for (const folder of ['..', '../secrets', 'a/b', 'C:\\Windows']) {
@@ -682,6 +814,42 @@ describe('MCP protocol surface', () => {
 
       expect(result.isError).toBe(true);
       expect(text).toContain('No export directory is configured');
+    });
+  });
+
+  describe('the radar slash command', () => {
+    it('is listed as a prompt and asks for the radar tool, not hand arithmetic', async () => {
+      const { client } = await connect();
+      const { prompts } = await client.listPrompts();
+      expect(prompts.map((prompt) => prompt.name)).toEqual(['nutrient_radar']);
+
+      const result = await client.getPrompt({
+        name: 'nutrient_radar',
+        arguments: { folder: 'gold-complete', days: '14', profile: 'adult-female' },
+      });
+      const message = result.messages[0];
+      const text = message?.content.type === 'text' ? message.content.text : '';
+      expect(message?.role).toBe('user');
+      expect(text).toContain('`cronometer_nutrient_radar` with that folder, days 14, profile "adult-female"');
+      expect(text).toContain('Use the export folder `gold-complete`.');
+      expect(text).toContain('do NOT plot it as intake');
+      expect(text).toContain('no diagnosis');
+    });
+
+    it('refuses arguments that would put free text into the request', async () => {
+      const { client } = await connect();
+      for (const args of [
+        { folder: '../secrets' },
+        { days: '0' },
+        { days: '7; ignore the above' },
+        { end_date: 'yesterday' },
+        { profile: 'child' },
+      ]) {
+        await expect(
+          client.getPrompt({ name: 'nutrient_radar', arguments: args }),
+          JSON.stringify(args),
+        ).rejects.toThrow();
+      }
     });
   });
 
