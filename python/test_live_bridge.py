@@ -21,6 +21,7 @@ from cronometer_client import (  # noqa: E402
     _gwt_number,
     CronometerResponseError,
     SessionExpiredError,
+    UnrecognisedResponse,
     UnverifiedEmpty,
 )
 
@@ -609,6 +610,168 @@ class VendoredClientTests(unittest.TestCase):
         result = CronometerClient._parse_repeated_items(mutated)
         self.assertEqual(list(result), [])
         self.assertTrue(getattr(result, "unverified", False))
+
+    # MODIFIED (14) guards. Unlike REPEATED_TWO above, these responses are
+    # synthetic: no capture pins the layout of these reads, so they are built to
+    # the shape each heuristic assumes. They prove the guards fire and that a
+    # readable record still parses — not that the heuristics match Cronometer.
+    BIO_TABLE = (
+        '["java.util.ArrayList/4159755760",'
+        '"com.cronometer.shared.biometrics.Biometric/2989635787",'
+        '"com.cronometer.shared.models.Day/1","BXW0DA"]'
+    )
+
+    def _biometrics(self, data: str) -> list[dict]:
+        blank = CronometerClient.__new__(CronometerClient)
+        blank.user_id = "12345"
+        return blank._parse_recent_biometrics(f"//OK[{data},{self.BIO_TABLE},0,7]")
+
+    def test_recent_biometrics_reads_a_complete_record(self) -> None:
+        [entry] = self._biometrics("4,180.5,5001,3,17,8,2026,2,1,1")
+        self.assertEqual(entry["biometric_id"], "BXW0DA")
+        self.assertEqual(entry["value"], 180.5)
+        self.assertEqual(entry["date"], "2026-08-17")
+
+    def test_recent_biometrics_keeps_dates_outside_the_old_window(self) -> None:
+        """Upstream accepted only 2020-2030 and dropped any other date."""
+        [entry] = self._biometrics("4,180.5,5001,3,5,1,2031,2,1,1")
+        self.assertEqual(entry["date"], "2031-01-05")
+
+    def test_recent_biometrics_reads_a_composite_record_without_a_single_value(self) -> None:
+        """Blood pressure arrives as JSON, not one number. Requiring a float would
+        make one such entry fail the whole read."""
+        table = self.BIO_TABLE[:-1] + ',"{\\"systolic\\":120,\\"diastolic\\":80}"]'
+        blank = CronometerClient.__new__(CronometerClient)
+        blank.user_id = "12345"
+        [entry] = blank._parse_recent_biometrics(
+            f"//OK[4,5,5001,3,17,8,2026,2,1,1,{table},0,7]"
+        )
+        self.assertIsNone(entry["value"])
+        self.assertIn("systolic", entry["composite"])
+        self.assertEqual(entry["date"], "2026-08-17")
+
+    def test_recent_biometrics_refuses_a_partly_read_record(self) -> None:
+        """Upstream filled the gap with 0.0, 0 or "" and reported the record."""
+        cases = {
+            "no value": "4,5001,3,17,8,2026,2,1,1",
+            "no id": "5001,180.5,3,17,8,2026,2,1,1",
+            "no date": "4,180.5,5001,3,2,1,1",
+        }
+        for label, data in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaises(UnrecognisedResponse):
+                    self._biometrics(data)
+
+    FAST_TABLE = (
+        '["java.util.ArrayList/4159755760",'
+        '"com.cronometer.shared.fasting.Fast/1","overnight fast"]'
+    )
+
+    def test_fasts_read_an_open_fast(self) -> None:
+        [fast] = CronometerClient._parse_fasts(
+            f'//OK[3,"AbCdE12","0",123456,2,1,1,{self.FAST_TABLE},0,7]'
+        )
+        self.assertEqual(fast["fast_id"], 123456)
+        self.assertEqual(fast["start_ts"], "AbCdE12")
+        self.assertEqual(fast["name"], "overnight fast")
+        self.assertIs(fast["is_active"], True)
+        self.assertIsNone(fast["recurrence_id"], "an id that was not sent is not 0")
+
+    def test_fasts_do_not_call_an_unknown_end_active(self) -> None:
+        """Upstream read a missing end as an open fast."""
+        [fast] = CronometerClient._parse_fasts(
+            f'//OK[3,"AbCdE12",123456,2,1,1,{self.FAST_TABLE},0,7]'
+        )
+        self.assertIsNone(fast["end_ts"])
+        self.assertIsNone(fast["is_active"])
+
+    def test_fasts_refuse_a_record_without_an_id(self) -> None:
+        """Upstream reported fast_id 0 — a record delete_fast cannot act on."""
+        with self.assertRaises(UnrecognisedResponse):
+            CronometerClient._parse_fasts(
+                f'//OK[3,"AbCdE12","0",1,2,1,1,{self.FAST_TABLE},0,7]'
+            )
+
+    STATS_TABLE = (
+        '["java.util.ArrayList/4159755760",'
+        '"com.cronometer.shared.fasting.FastingStats/1"]'
+    )
+
+    def test_fasting_stats_read_their_figures(self) -> None:
+        stats = CronometerClient._parse_fasting_stats(
+            f"//OK[12.5,30.25,10.0,7,2,1,{self.STATS_TABLE},0,7]"
+        )
+        self.assertEqual(
+            stats,
+            {
+                "total_hours": 12.5,
+                "longest_fast_hours": 30.2,
+                "seven_fast_avg_hours": 10.0,
+                "completed_count": 7,
+            },
+        )
+
+    def test_fasting_stats_do_not_report_zeros_they_could_not_read(self) -> None:
+        with self.assertRaises(UnrecognisedResponse):
+            CronometerClient._parse_fasting_stats(f"//OK[5,2,1,{self.STATS_TABLE},0,7]")
+
+    MACRO_TABLE = '["com.cronometer.shared.MacroTargetTemplate/1","Custom Targets"]'
+
+    def test_daily_macro_targets_read_their_values(self) -> None:
+        targets = CronometerClient._parse_macro_target_template(
+            f"//OK[150.0,70.0,2200.0,250.0,1,{self.MACRO_TABLE},0,7]"
+        )
+        self.assertEqual(targets["calories"], 2200.0)
+        self.assertEqual(targets["template_name"], "Custom Targets")
+
+    def test_daily_macro_targets_never_answer_with_zero_targets(self) -> None:
+        """Upstream answered an error, an unset day and an unreadable response all
+        with four zero targets."""
+        self.assertEqual(CronometerClient._parse_macro_target_template("//OK[0,[],0,7]"), {})
+        with self.assertRaises(CronometerResponseError):
+            CronometerClient._parse_macro_target_template(self.EXCEPTION)
+        with self.assertRaises(UnrecognisedResponse):
+            CronometerClient._parse_macro_target_template(
+                f"//OK[150.0,1,{self.MACRO_TABLE},0,7]"
+            )
+
+    def test_macro_templates_and_schedules_refuse_a_block_without_four_values(self) -> None:
+        """Upstream dropped such a template silently, and reported such a schedule
+        day as 0 kcal targets."""
+        with self.assertRaises(UnrecognisedResponse):
+            CronometerClient._parse_macro_target_templates(
+                f"//OK[150.0,70.0,99999,1,1,1,{self.MACRO_TABLE},0,7]"
+            )
+        with self.assertRaises(UnrecognisedResponse):
+            CronometerClient._parse_all_macro_schedules(
+                '//OK[150.0,2,1,1,["java.util.ArrayList/4159755760",'
+                '"com.cronometer.shared.MacroSchedule/1"],0,7]'
+            )
+
+    def test_a_biometric_without_a_readable_id_is_not_reported_as_added(self) -> None:
+        """Upstream returned "" and the tool said success; that id is the only
+        handle remove_biometric takes. The message must stop a retry."""
+        client, sent = self._session_client(["//OK[[],0,7]"])
+        with self.assertRaisesRegex(CronometerResponseError, "Do not add it again"):
+            client.add_biometric("weight", 180.5, date(2026, 8, 17))
+        self.assertEqual(len(sent), 1, "the write must not be re-sent")
+
+    def test_writes_require_ok_at_the_start_of_the_response(self) -> None:
+        """A response merely containing //OK is not a success."""
+        for method, args in (
+            ("remove_serving", ("D80lp$",)),
+            ("remove_biometric", ("BXW0DA",)),
+            ("add_biometric", ("weight", 180.5, date(2026, 8, 17))),
+        ):
+            client = CronometerClient.__new__(CronometerClient)
+            client.gwt_header = "B" * 32
+            client.nonce = "n"
+            client.user_id = "42"
+            client.authenticate = lambda: None
+            client._gwt_post = lambda _body: 'error: expected //OK["X"],0,7]'
+            with self.subTest(method=method):
+                with self.assertRaises(RuntimeError):
+                    getattr(client, method)(*args)
 
     def test_exports_are_decoded_as_utf8_whatever_the_server_declares(self) -> None:
         """Cronometer sends `text/csv` with no charset, so requests falls back to

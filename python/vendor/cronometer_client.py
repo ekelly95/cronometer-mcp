@@ -70,6 +70,22 @@ Deliberate changes from upstream, each marked `MODIFIED` at the site:
      dead one and could never succeed.
  13. Numbers in GWT bodies are written without exponents (`_gwt_number`).
      Upstream's `str()` turned 0.00001 into `1e-05`.
+ 14. The remaining heuristic parsers (recent biometrics, fasts, fasting stats,
+     macro schedules) no longer fill a field they could not find with 0, 0.0 or
+     "". A field that identifies the record or carries its measurement is
+     required, and its absence raises UnrecognisedResponse; a descriptive field
+     that may legitimately be absent is None. The biometric date no longer has to
+     fall in 2020-2030, a fast's lone start time is no longer read a second time
+     as its end, and a daily macro target that is unset or unreadable is no
+     longer reported as four zero targets. These parsers are still heuristics — unlike change 11, no
+     captured response pins their layout — so this guards them, it does not
+     verify them.
+ 15. `add_biometric` refuses to report success without the new entry's id, which
+     is the only handle `remove_biometric` accepts. Every write's success check is
+     `startswith("//OK")` rather than a substring test. `_gwt_post` already
+     enforces that, so this is consistency, not a behaviour change on its own.
+ 16. The `date.today()` defaults are gone. They read the machine's timezone, not
+     the diary's, and the bridge always passes explicit dates.
 
 Keep this list current. It is the whole record of how this file differs from the
 code it came from.
@@ -744,26 +760,21 @@ class CronometerClient:
     def export_raw(
         self,
         export_type: str,
-        start: date | None = None,
-        end: date | None = None,
+        start: date,
+        end: date,
     ) -> str:
         """Export raw CSV data from Cronometer.
 
         Args:
             export_type: One of 'servings', 'daily_summary', 'exercises',
                         'biometrics', 'notes'.
-            start: Start date (defaults to today).
-            end: End date (defaults to today).
+            start: Start date. MODIFIED (16): required; no today default.
+            end: End date. MODIFIED (16): required; no today default.
 
         Returns:
             Raw CSV text.
         """
         self.authenticate()
-
-        if start is None:
-            start = date.today()
-        if end is None:
-            end = date.today()
 
         # MODIFIED (2): an export is a read, so a refused session may be retried
         # once. From upstream PR #1, but scoped to this method rather than placed
@@ -812,16 +823,16 @@ class CronometerClient:
     def export_parsed(
         self,
         export_type: str,
-        start: date | None = None,
-        end: date | None = None,
+        start: date,
+        end: date,
     ) -> list[dict]:
         """Export and parse CSV data into a list of dicts.
 
         Args:
             export_type: One of 'servings', 'daily_summary', 'exercises',
                         'biometrics', 'notes'.
-            start: Start date (defaults to today).
-            end: End date (defaults to today).
+            start: Start date. MODIFIED (16): required.
+            end: End date. MODIFIED (16): required.
 
         Returns:
             List of dicts, one per CSV row.
@@ -1319,23 +1330,23 @@ class CronometerClient:
         )
         raw = self._gwt_post(body)
         # Success response: //OK[[],0,7]
-        if "//OK" not in raw:
+        if not raw.startswith("//OK"):
             raise RuntimeError(f"removeServing returned unexpected response: {raw[:200]}")
         logger.info("Removed serving %s", serving_id)
         return True
 
     def get_food_log(
         self,
-        start: date | None = None,
-        end: date | None = None,
+        start: date,
+        end: date,
     ) -> list[dict]:
         """Get detailed food log (servings) for a date range."""
         return self.export_parsed("servings", start, end)
 
     def get_daily_summary(
         self,
-        start: date | None = None,
-        end: date | None = None,
+        start: date,
+        end: date,
     ) -> list[dict]:
         """Get daily nutrition summary for a date range."""
         return self.export_parsed("daily_summary", start, end)
@@ -1413,19 +1424,39 @@ class CronometerClient:
 
         Returns:
             Dict with keys: protein_g, fat_g, calories, carbs_g, template_name.
+            MODIFIED (14): an empty dict when Cronometer confirms no target is
+            set for the day.
         """
-        result = {
-            "protein_g": 0.0,
-            "fat_g": 0.0,
-            "calories": 0.0,
-            "carbs_g": 0.0,
-            "template_name": "",
-        }
-
+        # MODIFIED (14): upstream started from four zero targets and returned them
+        # for an error response, an unset day and an unreadable one alike — three
+        # different answers all reading as "your targets are 0 kcal".
         if not raw.startswith("//OK[") or not raw.endswith(",0,7]"):
-            return result
+            raise CronometerResponseError(
+                f"Cronometer did not return a readable response: {raw[:200]}"
+            )
+        if CronometerClient._is_confirmed_empty(raw):
+            return {}
 
         string_table = CronometerClient._extract_gwt_string_table(raw)
+
+        # Tokenize and extract float values
+        tokens = CronometerClient._tokenize_gwt_data(raw, string_table)
+        floats = [t for t in tokens if isinstance(t, float)]
+
+        # In MacroTargetTemplate responses, floats appear in order:
+        # protein, fat, calories, carbs
+        if len(floats) < 4:
+            raise UnrecognisedResponse(
+                f"Macro targets carried {len(floats)} of the 4 values expected. "
+                "The response layout has changed; refusing to report zero targets."
+            )
+        result: dict = {
+            "protein_g": floats[0],
+            "fat_g": floats[1],
+            "calories": floats[2],
+            "carbs_g": floats[3],
+            "template_name": None,
+        }
 
         # Template name = last non-class string in the string table
         for entry in reversed(string_table):
@@ -1436,18 +1467,6 @@ class CronometerClient:
             ):
                 result["template_name"] = entry
                 break
-
-        # Tokenize and extract float values
-        tokens = CronometerClient._tokenize_gwt_data(raw, string_table)
-        floats = [t for t in tokens if isinstance(t, float)]
-
-        # In MacroTargetTemplate responses, floats appear in order:
-        # protein, fat, calories, carbs
-        if len(floats) >= 4:
-            result["protein_g"] = floats[0]
-            result["fat_g"] = floats[1]
-            result["calories"] = floats[2]
-            result["carbs_g"] = floats[3]
 
         return result
 
@@ -1561,24 +1580,27 @@ class CronometerClient:
         for block_idx, block in enumerate(blocks):
             dow_ordinal = ordinals[block_idx]
 
+            # Extract floats from this block → [protein, fat, calories, carbs]
+            # MODIFIED (14): upstream started each day at zero targets and kept
+            # them when it could not find four values, so a misread day looked
+            # like a day with 0 kcal targets.
+            floats = [t for t in block if isinstance(t, float)]
+            if len(floats) < 4:
+                raise UnrecognisedResponse(
+                    f"Macro schedule block {block_idx + 1} carried {len(floats)} of the "
+                    "4 values expected. The response layout has changed."
+                )
+
             template_data = {
                 "day_of_week": dow_ordinal,
                 "day_name": _DOW_NAMES[dow_ordinal] if 0 <= dow_ordinal < 7 else f"Day {dow_ordinal}",
-                "protein_g": 0.0,
-                "fat_g": 0.0,
-                "calories": 0.0,
-                "carbs_g": 0.0,
-                "template_name": "",
-                "template_id": 0,
+                "protein_g": floats[0],
+                "fat_g": floats[1],
+                "calories": floats[2],
+                "carbs_g": floats[3],
+                "template_name": None,
+                "template_id": None,
             }
-
-            # Extract floats from this block → [protein, fat, calories, carbs]
-            floats = [t for t in block if isinstance(t, float)]
-            if len(floats) >= 4:
-                template_data["protein_g"] = floats[0]
-                template_data["fat_g"] = floats[1]
-                template_data["calories"] = floats[2]
-                template_data["carbs_g"] = floats[3]
 
             # Template name: look for string refs (positive or negative)
             for t in block:
@@ -1621,19 +1643,17 @@ class CronometerClient:
         ))
         return self._parse_all_macro_schedules(raw)
 
-    def get_daily_macro_targets(self, day: date | None = None) -> dict:
+    def get_daily_macro_targets(self, day: date) -> dict:
         """Get the effective macro targets for a specific date.
 
         Args:
-            day: Target date (defaults to today).
+            day: Target date. MODIFIED (16): required; no today default.
 
         Returns:
             Dict with keys: protein_g, fat_g, calories, carbs_g,
             template_name.
         """
         self.authenticate()
-        if day is None:
-            day = date.today()
         # Built lazily: after a re-login the retry needs the new nonce.
         raw = self._gwt_read(lambda: (
             GWT_GET_DAILY_MACRO_TARGET_TEMPLATE
@@ -1780,27 +1800,34 @@ class CronometerClient:
             floats = [t for t in block if isinstance(t, float)]
 
             # Extract template name
-            name = ""
+            name = None
             for t in block:
                 if isinstance(t, int) and t in template_name_map:
                     name = template_name_map[t]
 
-            # Extract template ID: large int > string table size
-            template_id = 0
+            # Extract template ID: large int > string table size.
+            # MODIFIED (14): None when absent; upstream's 0 is not an id.
+            template_id = None
             for t in block:
                 if isinstance(t, int) and t > len(string_table):
                     template_id = t
                     break
 
-            if len(floats) >= 4:
-                templates.append({
-                    "template_id": template_id,
-                    "template_name": name,
-                    "protein_g": floats[0],
-                    "fat_g": floats[1],
-                    "calories": floats[2],
-                    "carbs_g": floats[3],
-                })
+            # MODIFIED (14): upstream dropped a block with fewer than four macro
+            # values without a word, so a template it misread simply vanished.
+            if len(floats) < 4:
+                raise UnrecognisedResponse(
+                    f"Macro template {block_idx + 1} carried {len(floats)} of the 4 "
+                    "values expected. The response layout has changed."
+                )
+            templates.append({
+                "template_id": template_id,
+                "template_name": name,
+                "protein_g": floats[0],
+                "fat_g": floats[1],
+                "calories": floats[2],
+                "carbs_g": floats[3],
+            })
 
             block_idx += 1
 
@@ -1835,7 +1862,7 @@ class CronometerClient:
             .replace("{template_id}", str(template_id))
         )
         raw = self._gwt_post(body)
-        if "//OK" in raw:
+        if raw.startswith("//OK"):
             logger.info(
                 "Set macro schedule: day_of_week=%d (US) -> %d (ISO), "
                 "template_id=%d",
@@ -1929,7 +1956,7 @@ class CronometerClient:
         body = header + data
         raw = self._gwt_post(body)
 
-        if "//OK" not in raw:
+        if not raw.startswith("//OK"):
             raise RuntimeError(
                 f"saveMacroTargetTemplate failed: {raw[:300]}"
             )
@@ -1971,7 +1998,7 @@ class CronometerClient:
             .replace("{template_id}", str(template_id))
         )
         raw = self._gwt_post(body)
-        if "//OK" in raw:
+        if raw.startswith("//OK"):
             logger.info("Deleted macro target template: id=%d", template_id)
             return True
         raise RuntimeError(
@@ -2060,7 +2087,7 @@ class CronometerClient:
             .replace("{fast_id}", str(fast_id))
         )
         raw = self._gwt_post(body)
-        if "//OK" in raw:
+        if raw.startswith("//OK"):
             logger.info("Deleted fast: id=%d", fast_id)
             return True
         raise RuntimeError(f"deleteFast failed: {raw[:300]}")
@@ -2083,7 +2110,7 @@ class CronometerClient:
             .replace("{fast_id}", str(fast_id))
         )
         raw = self._gwt_post(body)
-        if "//OK" in raw:
+        if raw.startswith("//OK"):
             logger.info("Cancelled fast (kept series): id=%d", fast_id)
             return True
         raise RuntimeError(
@@ -2104,26 +2131,40 @@ class CronometerClient:
                 f"Cronometer did not return a readable response: {raw[:200]}"
             )
 
+        # MODIFIED (14): upstream started from four zeros and overwrote whichever
+        # it could find, so an unreadable response came back as "no fasting".
+        # The zeros are real only for the empty response a fast-free account was
+        # seen to return; anything else must yield all three hour figures.
+        zeros = {
+            "total_hours": 0.0,
+            "longest_fast_hours": 0.0,
+            "seven_fast_avg_hours": 0.0,
+            "completed_count": 0,
+        }
+        if CronometerClient._is_confirmed_empty(raw):
+            return zeros
+
         string_table = CronometerClient._extract_gwt_string_table(raw)
         tokens = CronometerClient._tokenize_gwt_data(raw, string_table)
 
         floats = [t for t in tokens if isinstance(t, float)]
         ints = [t for t in tokens if isinstance(t, int)]
 
+        if len(floats) < 3:
+            raise UnrecognisedResponse(
+                f"Fasting stats carried {len(floats)} of the 3 hour figures expected. "
+                "The response layout has changed; refusing to report zeros for it."
+            )
+
         result = {
-            "total_hours": 0.0,
-            "longest_fast_hours": 0.0,
-            "seven_fast_avg_hours": 0.0,
-            "completed_count": 0,
+            "total_hours": round(floats[0], 1),
+            "longest_fast_hours": round(floats[1], 1),
+            "seven_fast_avg_hours": round(floats[2], 1),
+            "completed_count": None,
         }
 
-        if len(floats) >= 3:
-            result["total_hours"] = round(floats[0], 1)
-            result["longest_fast_hours"] = round(floats[1], 1)
-            result["seven_fast_avg_hours"] = round(floats[2], 1)
-
         # completed_count is typically the first large-ish int
-        # (after string table refs which are small)
+        # (after string table refs which are small). Not found means unknown.
         for val in ints:
             if val > len(string_table) and val < 100000:
                 result["completed_count"] = val
@@ -2228,15 +2269,18 @@ class CronometerClient:
             # Extract quoted strings (base62 timestamps)
             quoted_strings = [t for t in block if isinstance(t, str)]
 
-            # Build fast dict
+            # MODIFIED (14): upstream defaulted both ids to 0 and every string to
+            # "", so a block it could not read still came back as a fast — one
+            # with id 0, which delete_fast refuses, and "active" because its blank
+            # end looked like an open one. Unknown is now None.
             fast = {
-                "fast_id": large_ints[0] if len(large_ints) >= 1 else 0,
-                "recurrence_id": large_ints[1] if len(large_ints) >= 2 else 0,
-                "name": "",
-                "recurrence_rule": "",
-                "start_ts": "",
-                "end_ts": "",
-                "is_active": False,
+                "fast_id": large_ints[0] if len(large_ints) >= 1 else None,
+                "recurrence_id": large_ints[1] if len(large_ints) >= 2 else None,
+                "name": None,
+                "recurrence_rule": None,
+                "start_ts": None,
+                "end_ts": None,
+                "is_active": None,
             }
 
             # Assign strings heuristically
@@ -2255,18 +2299,40 @@ class CronometerClient:
                         fast["name"] = s
                     # Additional strings could be notes
 
-            # Timestamps from quoted strings in the block
+            # Timestamps from quoted strings in the block.
+            # MODIFIED (14): skip one already taken above. Quoted strings are in
+            # block_strings too, so upstream read a lone start time a second time
+            # as the end, and every open fast came back as finished.
             for s in quoted_strings:
+                if s in (fast["start_ts"], fast["end_ts"]):
+                    continue
                 if s and s != "0" and len(s) >= 5:
                     if not fast["start_ts"]:
                         fast["start_ts"] = s
                     elif not fast["end_ts"]:
                         fast["end_ts"] = s
 
-            fast["is_active"] = fast["end_ts"] in ("", "0")
+            # MODIFIED (14): an open fast is the one whose end is the literal "0".
+            # An end that simply was not found says nothing either way, so it is
+            # left unknown instead of read as "still running".
+            if fast["end_ts"] is None and "0" in quoted_strings:
+                fast["end_ts"] = "0"
+            if fast["end_ts"] is not None:
+                fast["is_active"] = fast["end_ts"] == "0"
 
-            if fast["fast_id"] or fast["name"]:
-                fasts.append(fast)
+            # MODIFIED (14): upstream kept a block with an id *or* a name and
+            # skipped the rest silently. A fast is its id and its start; without
+            # either, this heuristic is not reading the layout it assumes.
+            missing = [
+                field for field in ("fast_id", "start_ts") if fast[field] is None
+            ]
+            if missing:
+                raise UnrecognisedResponse(
+                    f"Fast record {block_idx + 1} has no readable "
+                    f"{', '.join(missing)}. The response layout has changed; "
+                    "refusing to report a partly-read fast."
+                )
+            fasts.append(fast)
 
             block_idx += 1
 
@@ -2338,16 +2404,22 @@ class CronometerClient:
         )
         raw = self._gwt_post(body)
 
-        if "//OK" not in raw:
+        if not raw.startswith("//OK"):
             raise RuntimeError(f"addBiometric failed: {raw[:300]}")
 
         # Extract biometric ID from response: //OK["BXW0DA",[],0,7]
-        biometric_id = ""
-        if raw.startswith("//OK["):
-            import re
-            match = re.search(r'"([A-Za-z0-9]+)"', raw)
-            if match:
-                biometric_id = match.group(1)
+        match = re.search(r'"([A-Za-z0-9]+)"', raw) if raw.startswith("//OK[") else None
+        if match is None:
+            # MODIFIED (15): upstream returned "" here and the call reported
+            # success. The id is the only handle remove_biometric accepts, so
+            # without it the entry could not be undone from here — and a caller
+            # told "failed" might write it a second time.
+            raise CronometerResponseError(
+                "Cronometer accepted the measurement, so it was probably recorded, "
+                "but its id could not be read from the response. Do not add it "
+                "again; check the Cronometer app, where it can also be deleted."
+            )
+        biometric_id = match.group(1)
 
         logger.info(
             "Added biometric: type=%s, value=%.1f, date=%s, id=%s",
@@ -2373,7 +2445,7 @@ class CronometerClient:
             .replace("{biometric_id}", biometric_id)
         )
         raw = self._gwt_post(body)
-        if "//OK" in raw:
+        if raw.startswith("//OK"):
             logger.info("Removed biometric: id=%s", biometric_id)
             return True
         raise RuntimeError(f"removeMeasurement failed: {raw[:300]}")
@@ -2462,12 +2534,14 @@ class CronometerClient:
                 and abs(t) > len(string_table)
             ]
 
-            # Build entry
+            # MODIFIED (14): nothing here is defaulted to 0 or "". Upstream reported
+            # a value of 0.0, a metric of 0 and a blank date for whatever the
+            # heuristic missed, which reads as a real measurement of nothing.
             entry = {
-                "biometric_id": "",
-                "value": floats[0] if floats else 0.0,
-                "metric_id": 0,
-                "date": "",
+                "biometric_id": None,
+                "value": floats[0] if floats else None,
+                "metric_id": None,
+                "date": None,
             }
 
             # Biometric IDs are short alphanumeric strings (6-8 chars)
@@ -2483,7 +2557,10 @@ class CronometerClient:
                     entry["composite"] = s
 
             # Extract date: look for 3 consecutive small ints that
-            # could be day/month/year
+            # could be day/month/year.
+            # MODIFIED (14): upstream accepted only 2020-2030, so a measurement
+            # from 2019 or 2031 silently lost its date. The bound left is a sanity
+            # check against reading some other integer as a year, not a window.
             for i in range(len(block) - 2):
                 if (
                     isinstance(block[i], int)
@@ -2491,7 +2568,7 @@ class CronometerClient:
                     and isinstance(block[i + 2], int)
                     and 1 <= block[i] <= 31
                     and 1 <= block[i + 1] <= 12
-                    and 2020 <= block[i + 2] <= 2030
+                    and 1900 <= block[i + 2] <= 2100
                 ):
                     entry["date"] = (
                         f"{block[i + 2]:04d}-{block[i + 1]:02d}-"
@@ -2505,8 +2582,24 @@ class CronometerClient:
                     entry["metric_id"] = val
                     break
 
-            if entry["biometric_id"] or entry["value"]:
-                biometrics.append(entry)
+            # MODIFIED (14): upstream kept a block that had an id *or* a value and
+            # skipped the rest without a word. A record is its id, its measurement
+            # and its day; missing any one means the layout is not the one this
+            # heuristic assumes, and a partial record is worse than none. A composite
+            # measurement such as blood pressure carries its reading in the JSON
+            # `composite` string rather than one number, so that counts as its value.
+            missing = [
+                field for field in ("biometric_id", "value", "date")
+                if entry[field] is None
+                and not (field == "value" and "composite" in entry)
+            ]
+            if missing:
+                raise UnrecognisedResponse(
+                    f"Recent-biometrics record {block_idx + 1} has no readable "
+                    f"{', '.join(missing)}. The response layout has changed; "
+                    "refusing to report a partly-read measurement."
+                )
+            biometrics.append(entry)
 
             block_idx += 1
 
