@@ -18,7 +18,11 @@ published releases; `package.json` stays at `0.1.0`.
   returning 61 insufficient-data nutrients.
 - `cronometer_export_raw` refuses a response whose header is not the requested export,
   such as a login page.
-- The vendored client's remaining heuristic parsers (recent biometrics, fasts, fasting
+- `cronometer_get_recent_biometrics` reads its response by walking the GWT stream, pinned
+  against a live capture. The old heuristic read the data backwards and rejected ids
+  containing `_`, which is likely why it had been seen returning nothing while a weight
+  was logged. MODIFIED (17).
+- The vendored client's remaining heuristic parsers (fasts, fasting
   stats, macro targets, templates and schedules) no longer fill fields they cannot find
   with `0`, `0.0` or `""`. A missing identifying or measured field raises; an optional
   one is `null`. The daily macro targets for an unset day are `{}`, not four zero targets.

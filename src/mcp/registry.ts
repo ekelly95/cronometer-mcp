@@ -532,7 +532,7 @@ export const LIVE_TOOL_REGISTRY: readonly LiveToolDefinition[] = [
     name: 'cronometer_get_recent_biometrics',
     title: 'Get Recent Biometrics',
     description:
-      'Read whatever Cronometer returns from its own recent-biometrics view. This is narrower than it sounds and has been observed returning nothing while a manually entered weight existed for the previous day, so an empty result here is not evidence that no measurements are recorded. To answer "what have I logged", use cronometer_get_biometric_log, which reads the export and is authoritative.',
+      'Read Cronometer’s own recent-biometrics view, mainly to find a biometric_id for cronometer_remove_biometric. It is narrow: on a live account it held only the latest entry while the log had several that week, and it does not say which metric an entry is (metric_id is null). An empty result is not evidence that nothing is recorded. To answer "what have I logged", use cronometer_get_biometric_log, which reads the export and is authoritative.',
     method: 'get_recent_biometrics',
     access: 'read',
     idempotent: true,

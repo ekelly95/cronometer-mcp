@@ -258,7 +258,7 @@ All tests are offline and use synthetic data:
 npm run verify      # typecheck, TypeScript, Python, and the setup scripts
 ```
 
-That is 535 TypeScript tests, 65 Python and 35 setup checks. The individual steps are `npm run typecheck`, `npm test`, `npm run test:python` and `npm run test:setup`; the last skips itself loudly where PowerShell is absent, rather than failing for a reason unrelated to the code being checked.
+That is 535 TypeScript tests, 66 Python and 35 setup checks. The individual steps are `npm run typecheck`, `npm test`, `npm run test:python` and `npm run test:setup`; the last skips itself loudly where PowerShell is absent, rather than failing for a reason unrelated to the code being checked.
 
 `npm test` builds first and checks both legacy MCP and the modern `2026-07-28` stdio handshake. The protocol suite calls every tool against a fake bridge, verifies tool permission labels, checks that every destructive tool refuses an unconfirmed call, ensures read handlers cannot reach mutation methods, and drives hostile multi-line text through both the success and error paths to prove neither can forge the end of the untrusted-data boundary. The remote connector's suite (`test/http`) runs the whole OAuth sign-in in-process — registration, PKCE, lockout, refresh rotation and reuse revocation — and then both protocol eras over Streamable HTTP with the issued token.
 

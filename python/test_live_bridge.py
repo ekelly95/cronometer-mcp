@@ -611,57 +611,89 @@ class VendoredClientTests(unittest.TestCase):
         self.assertEqual(list(result), [])
         self.assertTrue(getattr(result, "unverified", False))
 
+    # MODIFIED (17). The structure of a real getRecentBiometrics response, captured
+    # from a live account. Its one record was a weight entry, which
+    # the export's biometric log confirms. Every value that identified the account
+    # or the person (account id, entry id, weight, date) has been replaced; the
+    # token layout is untouched.
+    BIO_TABLE = (
+        '["java.util.ArrayList/4159755760",'
+        '"com.cronometer.shared.biometrics.Biometric/2989635787",'
+        '"com.cronometer.shared.entries.models.Day/782579793","{}",'
+        '"java.lang.Integer/3438268394"]'
+    )
+    BIO_ACCOUNT = "12345"
+
+    @classmethod
+    def _bio_record(cls, biometric_id: str, value: str, day: str, composite_ref: int = 4) -> str:
+        """One record in textual (reversed) order. `day` is "d,m,y" or a back-reference."""
+        if "," in day:
+            d, m, y = day.split(",")
+            day = f"{y},{m},{d},3"
+        return (
+            f'{cls.BIO_ACCOUNT},2,0,0,0,5,0,0,0,0,1,{composite_ref},"{biometric_id}",0,'
+            f"{day},{value},2"
+        )
+
+    def _biometrics(self, *records: str, table: str | None = None) -> list[dict]:
+        blank = CronometerClient.__new__(CronometerClient)
+        blank.user_id = self.BIO_ACCOUNT
+        data = ",".join(reversed(records)) + f",{len(records)},1"
+        return blank._parse_recent_biometrics(f"//OK[{data},{table or self.BIO_TABLE},0,7]")
+
+    def test_recent_biometrics_reads_the_captured_layout(self) -> None:
+        """Upstream's heuristic read this response forwards and found no record at
+        all: the id holds an underscore it rejected, and the date is stored
+        year-last in the stream, the reverse of what it scanned for."""
+        [entry] = self._biometrics(self._bio_record("Bxq9_A", "180.5", "17,8,2026"))
+        self.assertEqual(entry["biometric_id"], "Bxq9_A")
+        self.assertEqual(entry["value"], 180.5)
+        self.assertEqual(entry["date"], "2026-08-17")
+        self.assertIsNone(entry["metric_id"], "the response does not say which metric")
+        self.assertNotIn("composite", entry)
+
+    def test_recent_biometrics_reads_several_records_and_shared_days(self) -> None:
+        """Synthetic beyond the capture: a second record, then a third whose Day is
+        a GWT back-reference to the first record's Day (object 3)."""
+        entries = self._biometrics(
+            self._bio_record("Bxq9_A", "180.5", "17,8,2026"),
+            self._bio_record("Cab$1z", "181.0", "2,1,2031"),
+            self._bio_record("Dzz000", "22.5", "-3"),
+        )
+        self.assertEqual([e["biometric_id"] for e in entries], ["Bxq9_A", "Cab$1z", "Dzz000"])
+        self.assertEqual([e["date"] for e in entries], ["2026-08-17", "2031-01-02", "2026-08-17"])
+
+    def test_recent_biometrics_keeps_a_composite_reading(self) -> None:
+        table = self.BIO_TABLE[:-1] + ',"{\\"systolic\\":120,\\"diastolic\\":80}"]'
+        [entry] = self._biometrics(
+            self._bio_record("Bxq9_A", "0.0", "17,8,2026", composite_ref=6), table=table
+        )
+        self.assertIn("systolic", entry["composite"])
+
+    def test_recent_biometrics_refuses_a_response_it_cannot_fully_read(self) -> None:
+        good = self._bio_record("Bxq9_A", "180.5", "17,8,2026")
+        cases = {
+            "an impossible date": self._bio_record("Bxq9_A", "180.5", "31,2,2026"),
+            "no id": good.replace('"Bxq9_A"', "7"),
+            "a back-reference to nothing": self._bio_record("Bxq9_A", "180.5", "-9"),
+            "a record that never reaches the account id": good.replace(
+                f"{self.BIO_ACCOUNT},", "99999,", 1
+            ),
+        }
+        for label, record in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaises(CronometerResponseError):
+                    self._biometrics(record)
+        with self.subTest(case="a leftover token"):
+            blank = CronometerClient.__new__(CronometerClient)
+            blank.user_id = self.BIO_ACCOUNT
+            with self.assertRaises(CronometerResponseError):
+                blank._parse_recent_biometrics(f"//OK[7,{good},1,1,{self.BIO_TABLE},0,7]")
+
     # MODIFIED (14) guards. Unlike REPEATED_TWO above, these responses are
     # synthetic: no capture pins the layout of these reads, so they are built to
     # the shape each heuristic assumes. They prove the guards fire and that a
     # readable record still parses — not that the heuristics match Cronometer.
-    BIO_TABLE = (
-        '["java.util.ArrayList/4159755760",'
-        '"com.cronometer.shared.biometrics.Biometric/2989635787",'
-        '"com.cronometer.shared.models.Day/1","BXW0DA"]'
-    )
-
-    def _biometrics(self, data: str) -> list[dict]:
-        blank = CronometerClient.__new__(CronometerClient)
-        blank.user_id = "12345"
-        return blank._parse_recent_biometrics(f"//OK[{data},{self.BIO_TABLE},0,7]")
-
-    def test_recent_biometrics_reads_a_complete_record(self) -> None:
-        [entry] = self._biometrics("4,180.5,5001,3,17,8,2026,2,1,1")
-        self.assertEqual(entry["biometric_id"], "BXW0DA")
-        self.assertEqual(entry["value"], 180.5)
-        self.assertEqual(entry["date"], "2026-08-17")
-
-    def test_recent_biometrics_keeps_dates_outside_the_old_window(self) -> None:
-        """Upstream accepted only 2020-2030 and dropped any other date."""
-        [entry] = self._biometrics("4,180.5,5001,3,5,1,2031,2,1,1")
-        self.assertEqual(entry["date"], "2031-01-05")
-
-    def test_recent_biometrics_reads_a_composite_record_without_a_single_value(self) -> None:
-        """Blood pressure arrives as JSON, not one number. Requiring a float would
-        make one such entry fail the whole read."""
-        table = self.BIO_TABLE[:-1] + ',"{\\"systolic\\":120,\\"diastolic\\":80}"]'
-        blank = CronometerClient.__new__(CronometerClient)
-        blank.user_id = "12345"
-        [entry] = blank._parse_recent_biometrics(
-            f"//OK[4,5,5001,3,17,8,2026,2,1,1,{table},0,7]"
-        )
-        self.assertIsNone(entry["value"])
-        self.assertIn("systolic", entry["composite"])
-        self.assertEqual(entry["date"], "2026-08-17")
-
-    def test_recent_biometrics_refuses_a_partly_read_record(self) -> None:
-        """Upstream filled the gap with 0.0, 0 or "" and reported the record."""
-        cases = {
-            "no value": "4,5001,3,17,8,2026,2,1,1",
-            "no id": "5001,180.5,3,17,8,2026,2,1,1",
-            "no date": "4,180.5,5001,3,2,1,1",
-        }
-        for label, data in cases.items():
-            with self.subTest(case=label):
-                with self.assertRaises(UnrecognisedResponse):
-                    self._biometrics(data)
-
     FAST_TABLE = (
         '["java.util.ArrayList/4159755760",'
         '"com.cronometer.shared.fasting.Fast/1","overnight fast"]'

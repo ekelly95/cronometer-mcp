@@ -70,12 +70,11 @@ Deliberate changes from upstream, each marked `MODIFIED` at the site:
      dead one and could never succeed.
  13. Numbers in GWT bodies are written without exponents (`_gwt_number`).
      Upstream's `str()` turned 0.00001 into `1e-05`.
- 14. The remaining heuristic parsers (recent biometrics, fasts, fasting stats,
-     macro schedules) no longer fill a field they could not find with 0, 0.0 or
-     "". A field that identifies the record or carries its measurement is
+ 14. The remaining heuristic parsers (fasts, fasting stats, macro targets,
+     templates and schedules) no longer fill a field they could not find with 0,
+     0.0 or "". A field that identifies the record or carries its measurement is
      required, and its absence raises UnrecognisedResponse; a descriptive field
-     that may legitimately be absent is None. The biometric date no longer has to
-     fall in 2020-2030, a fast's lone start time is no longer read a second time
+     that may legitimately be absent is None. A fast's lone start time is no longer read a second time
      as its end, and a daily macro target that is unset or unreadable is no
      longer reported as four zero targets. These parsers are still heuristics — unlike change 11, no
      captured response pins their layout — so this guards them, it does not
@@ -86,6 +85,14 @@ Deliberate changes from upstream, each marked `MODIFIED` at the site:
      enforces that, so this is consistency, not a behaviour change on its own.
  16. The `date.today()` defaults are gone. They read the machine's timezone, not
      the diary's, and the bridge always passes explicit dates.
+ 17. Recent biometrics are read by walking the GWT stream, like change 11. The
+     upstream heuristic read the data forwards, so on a live response its first
+     "block" was the account id and the record's type marker. It also rejected ids
+     containing `_` (a GWT long is base64 and may hold `_` or `$`), read dates only
+     in day-month-year text order when the stream holds them reversed, and took
+     the year 2026 as the metric id. Pinned against a live response that matched
+     the export's biometric log. `add_biometric` reads the new id with the same
+     alphabet.
 
 Keep this list current. It is the whole record of how this file differs from the
 code it came from.
@@ -2408,7 +2415,7 @@ class CronometerClient:
             raise RuntimeError(f"addBiometric failed: {raw[:300]}")
 
         # Extract biometric ID from response: //OK["BXW0DA",[],0,7]
-        match = re.search(r'"([A-Za-z0-9]+)"', raw) if raw.startswith("//OK[") else None
+        match = re.search(r'"([A-Za-z0-9$_]+)"', raw) if raw.startswith("//OK[") else None
         if match is None:
             # MODIFIED (15): upstream returned "" here and the call reported
             # success. The id is the only handle remove_biometric accepts, so
@@ -2451,9 +2458,31 @@ class CronometerClient:
         raise RuntimeError(f"removeMeasurement failed: {raw[:300]}")
 
     def _parse_recent_biometrics(self, raw: str) -> list[dict]:
-        """Parse getRecentBiometrics GWT response.
+        """Parse a getRecentBiometrics GWT response.
 
-        Returns list of biometric entries with id, metric_id, value, date.
+        MODIFIED (17): read by walking the stream, not by scanning blocks. GWT
+        writes its data section in reverse of the textual order, so read from the
+        end a response is a list header followed by one record per measurement:
+
+            <ArrayList ref> <record count>
+            per record:
+                <Biometric ref>
+                value                                       (number)
+                <Day ref> day month year                    or a back-reference
+                0                                           reserved
+                "biometric_id"                              GWT base64 long, quoted
+                <string-table ref to composite JSON>        "{}" when not composite
+                ... further fields, ending with the account's user id
+
+        Confirmed against a live response whose one record was a weight entry
+        on 2026-10-06: the export's biometric log has exactly that entry, which pins
+        day-before-month. The fields between the composite and the user id are
+        skipped, not interpreted. The `addBiometric` request sends the same object,
+        and nothing in it distinguishes one metric from another reliably, so
+        `metric_id` is None rather than a guess.
+
+        Returns list of entries with biometric_id, value, date and metric_id, and
+        `composite` when the measurement carries a JSON reading.
         """
         if not raw.startswith("//OK["):
             # MODIFIED (3): not an //OK response, so this is an error or a GWT
@@ -2466,143 +2495,133 @@ class CronometerClient:
         string_table = CronometerClient._extract_gwt_string_table(raw)
         tokens = CronometerClient._tokenize_gwt_data(raw, string_table)
 
-        # Find the Biometric type in string table
-        bio_type_idx = None
+        bio_ref = day_ref = list_ref = int_ref = None
         for idx, entry in enumerate(string_table):
             if "biometrics.Biometric/" in entry and "[L" not in entry:
-                bio_type_idx = idx + 1
-                break
+                bio_ref = idx + 1
+            elif "models.Day/" in entry:
+                day_ref = idx + 1
+            elif entry.startswith("java.util.ArrayList/"):
+                list_ref = idx + 1
+            elif entry.startswith("java.lang.Integer/"):
+                int_ref = idx + 1
 
-        if bio_type_idx is None:
+        if bio_ref is None or bio_ref not in tokens or list_ref is None:
             return CronometerClient._empty_or_unverified(raw)  # MODIFIED (6)
 
-        # Find Day type
-        day_type_idx = None
-        for idx, entry in enumerate(string_table):
-            if "models.Day/" in entry:
-                day_type_idx = idx + 1
-                break
+        if not (self.user_id or "").isdigit():
+            raise CronometerResponseError(
+                "Recent biometrics cannot be read without the account id, which "
+                "marks where each record ends."
+            )
+        account_id = int(self.user_id)
 
-        # Find first Biometric type ref to determine block size
-        first_bio_pos = None
-        for i, token in enumerate(tokens):
-            if token == bio_type_idx:
-                first_bio_pos = i
-                break
+        stream = list(reversed(tokens))
+        cursor = 0
 
-        if first_bio_pos is None:
-            return CronometerClient._empty_or_unverified(raw)  # MODIFIED (6)
-
-        block_size = first_bio_pos + 1
-
-        # Extract meaningful strings (biometric IDs, composite JSON, etc.)
-        meaningful_strings = {}
-        for idx, entry in enumerate(string_table):
-            if (
-                not entry.startswith("com.")
-                and not entry.startswith("java.")
-                and not entry.startswith("[")
-            ):
-                meaningful_strings[idx + 1] = entry
-                meaningful_strings[-(idx + 1)] = entry
-
-        biometrics = []
-        block_idx = 0
-        while True:
-            start = block_idx * block_size
-            end = start + block_size
-            if end > len(tokens):
-                break
-
-            block = tokens[start:end]
-
-            # Extract floats (biometric value)
-            floats = [t for t in block if isinstance(t, float)]
-
-            # Extract strings (biometric ID, composite JSON)
-            block_strings = []
-            for t in block:
-                if isinstance(t, str):
-                    block_strings.append(t)
-                elif isinstance(t, int) and t in meaningful_strings:
-                    block_strings.append(meaningful_strings[t])
-
-            # Extract large ints (metric_id, user_id, flags)
-            large_ints = [
-                t for t in block
-                if isinstance(t, int)
-                and abs(t) > len(string_table)
-            ]
-
-            # MODIFIED (14): nothing here is defaulted to 0 or "". Upstream reported
-            # a value of 0.0, a metric of 0 and a blank date for whatever the
-            # heuristic missed, which reads as a real measurement of nothing.
-            entry = {
-                "biometric_id": None,
-                "value": floats[0] if floats else None,
-                "metric_id": None,
-                "date": None,
-            }
-
-            # Biometric IDs are short alphanumeric strings (6-8 chars)
-            for s in block_strings:
-                if (
-                    len(s) >= 4 and len(s) <= 12
-                    and s.isalnum()
-                    and not s.startswith("com")
-                ):
-                    entry["biometric_id"] = s
-                elif s.startswith("{"):
-                    # Composite JSON (blood pressure, etc.)
-                    entry["composite"] = s
-
-            # Extract date: look for 3 consecutive small ints that
-            # could be day/month/year.
-            # MODIFIED (14): upstream accepted only 2020-2030, so a measurement
-            # from 2019 or 2031 silently lost its date. The bound left is a sanity
-            # check against reading some other integer as a year, not a window.
-            for i in range(len(block) - 2):
-                if (
-                    isinstance(block[i], int)
-                    and isinstance(block[i + 1], int)
-                    and isinstance(block[i + 2], int)
-                    and 1 <= block[i] <= 31
-                    and 1 <= block[i + 1] <= 12
-                    and 1900 <= block[i + 2] <= 2100
-                ):
-                    entry["date"] = (
-                        f"{block[i + 2]:04d}-{block[i + 1]:02d}-"
-                        f"{block[i]:02d}"
-                    )
-                    break
-
-            # metric_id is typically in the large_ints
-            for val in large_ints:
-                if val < 100000 and val != int(self.user_id or 0):
-                    entry["metric_id"] = val
-                    break
-
-            # MODIFIED (14): upstream kept a block that had an id *or* a value and
-            # skipped the rest without a word. A record is its id, its measurement
-            # and its day; missing any one means the layout is not the one this
-            # heuristic assumes, and a partial record is worse than none. A composite
-            # measurement such as blood pressure carries its reading in the JSON
-            # `composite` string rather than one number, so that counts as its value.
-            missing = [
-                field for field in ("biometric_id", "value", "date")
-                if entry[field] is None
-                and not (field == "value" and "composite" in entry)
-            ]
-            if missing:
-                raise UnrecognisedResponse(
-                    f"Recent-biometrics record {block_idx + 1} has no readable "
-                    f"{', '.join(missing)}. The response layout has changed; "
-                    "refusing to report a partly-read measurement."
+        def take(what: str) -> object:
+            nonlocal cursor
+            if cursor >= len(stream):
+                raise CronometerResponseError(
+                    f"Recent-biometrics response ended while reading {what}. "
+                    "Refusing to report a partly-read measurement."
                 )
+            value = stream[cursor]
+            cursor += 1
+            return value
+
+        if take("the list type") != list_ref:
+            return CronometerClient._empty_or_unverified(raw)  # MODIFIED (6)
+
+        count = take("the record count")
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise CronometerResponseError(
+                f"Recent-biometrics response gave an unreadable record count: {count!r}"
+            )
+        if count == 0:
+            return CronometerClient._empty_or_unverified(raw)  # MODIFIED (6)
+
+        # GWT numbers each object in the order it is first written and refers back
+        # to an object it has already sent with -n. Only Days are ever looked up.
+        next_object = 2  # the list itself is object 1
+        days_by_object: dict[int, str] = {}
+
+        biometrics: list[dict] = []
+        for index in range(count):
+            label = f"Recent-biometrics record {index + 1}"
+            if take("a record marker") != bio_ref:
+                raise CronometerResponseError(
+                    f"{label} did not begin where expected; the response layout has changed."
+                )
+            next_object += 1
+
+            value = take("a value")
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise CronometerResponseError(f"{label} had an unreadable value: {value!r}")
+
+            day_marker = take("a day")
+            if day_marker == day_ref:
+                day_object = next_object
+                next_object += 1
+                day_, month, year = take("a day"), take("a month"), take("a year")
+                try:
+                    when = date(year, month, day_).isoformat()  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    raise CronometerResponseError(
+                        f"{label} gave an impossible date: {day_!r}/{month!r}/{year!r}"
+                    ) from None
+                days_by_object[day_object] = when
+            elif isinstance(day_marker, int) and day_marker < 0 and -day_marker in days_by_object:
+                when = days_by_object[-day_marker]
+            else:
+                raise CronometerResponseError(
+                    f"{label} had no date where one was expected; the layout has changed."
+                )
+
+            take("a reserved field")
+            biometric_id = take("an id")
+            # A GWT long is base64 over A-Z a-z 0-9 $ _. Upstream accepted only
+            # letters and digits, so an id such as "Bvq3_G" was never found.
+            if not isinstance(biometric_id, str) or re.fullmatch(r"[A-Za-z0-9$_]+", biometric_id) is None:
+                raise CronometerResponseError(f"{label} had no readable id where one was expected.")
+
+            composite_ref = take("a composite reading")
+            if composite_ref == 0:
+                composite = None
+            elif isinstance(composite_ref, int) and 1 <= composite_ref <= len(string_table):
+                composite = string_table[composite_ref - 1]
+            else:
+                raise CronometerResponseError(f"{label} had an unreadable composite reading.")
+
+            # The rest of the record is skipped up to the account id that closes it.
+            # Bounded, so a layout change fails here rather than swallowing the next
+            # record.
+            for _ in range(16):
+                field = take("the account id that ends a record")
+                if field == account_id:
+                    break
+                if int_ref is not None and field == int_ref:
+                    next_object += 1
+            else:
+                raise CronometerResponseError(
+                    f"{label} did not end with the account id; the layout has changed."
+                )
+
+            entry: dict = {
+                "biometric_id": biometric_id,
+                "value": value,
+                "date": when,
+                "metric_id": None,
+            }
+            if composite not in (None, "", "{}"):
+                entry["composite"] = composite
             biometrics.append(entry)
 
-            block_idx += 1
-
+        if cursor != len(stream):
+            raise CronometerResponseError(
+                f"Recent-biometrics response had {len(stream) - cursor} unread value(s) "
+                "after its last record; the layout has changed."
+            )
         return biometrics
 
     # ── Diary operations ──────────────────────────────────────────────
