@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: shellcheck
-        run: shellcheck --shell=sh scripts/run-mcp.sh scripts/setup-macos.sh
+        run: shellcheck --shell=sh scripts/run-mcp.sh scripts/setup-macos.sh scripts/setup-linux.sh
 
       - name: Refuse CRLF in shell scripts
         # A carriage return becomes part of the interpreter path and the script dies

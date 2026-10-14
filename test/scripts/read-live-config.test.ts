@@ -36,6 +36,12 @@ describe('a configuration that is fine', () => {
     expect(readLiveConfig(JSON.stringify(withoutField)).credentialSource).toBe('dpapi');
   });
 
+  it('accepts the Linux Secret Service as a credential source', () => {
+    expect(readLiveConfig(encode({ credential_source: 'libsecret' })).credentialSource).toBe(
+      'libsecret',
+    );
+  });
+
   it('never returns anything resembling a password', () => {
     const result = readLiveConfig(encode({ password_dpapi: 'ciphertext-that-must-not-leak' }));
     expect(JSON.stringify(result)).not.toContain('ciphertext-that-must-not-leak');

@@ -6,7 +6,8 @@
 #
 # The one genuine difference is where the password lives. Windows encrypts it with
 # DPAPI and stores the ciphertext in live-config.json; here it is in the login
-# Keychain and the config file holds no secret at all.
+# Keychain (macOS) or the Secret Service keyring via `secret-tool` (Linux), and the
+# config file holds no secret at all.
 #
 # POSIX sh on purpose. macOS ships bash 3.2 from 2007, and nothing below needs more
 # than sh gives.
@@ -21,8 +22,16 @@ project_root=$(dirname -- "$script_dir")
 entry_point="$project_root/dist/mcp/main.js"
 
 case "$(uname -s)" in
-    Darwin) data_directory="$HOME/Library/Application Support/CronometerPersonalMcp" ;;
-    *)      data_directory="${XDG_DATA_HOME:-$HOME/.local/share}/CronometerPersonalMcp" ;;
+    Darwin)
+        data_directory="$HOME/Library/Application Support/CronometerPersonalMcp"
+        expected_source="keychain"
+        setup_script="scripts/setup-macos.sh"
+        ;;
+    *)
+        data_directory="${XDG_DATA_HOME:-$HOME/.local/share}/CronometerPersonalMcp"
+        expected_source="libsecret"
+        setup_script="scripts/setup-linux.sh"
+        ;;
 esac
 configuration_path="$data_directory/live-config.json"
 keychain_service="cronometer-personal-mcp"
@@ -32,8 +41,8 @@ die() {
     exit 1
 }
 
-[ -f "$entry_point" ] || die "Cronometer MCP is not built. Run scripts/setup-macos.sh first."
-[ -f "$configuration_path" ] || die "Cronometer MCP is not configured. Run scripts/setup-macos.sh first."
+[ -f "$entry_point" ] || die "Cronometer MCP is not built. Run $setup_script first."
+[ -f "$configuration_path" ] || die "Cronometer MCP is not configured. Run $setup_script first."
 
 # The counterpart of the Windows ACL check, and it matters more than it looks:
 # ~/Library/Application Support is not private by default the way %LOCALAPPDATA% is.
@@ -44,7 +53,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
 else
     mode=$(stat -c '%a' "$data_directory")
 fi
-[ "$mode" = "700" ] || die "The Cronometer data directory is mode $mode, not 700: $data_directory. Re-run scripts/setup-macos.sh to restrict it."
+[ "$mode" = "700" ] || die "The Cronometer data directory is mode $mode, not 700: $data_directory. Re-run $setup_script to restrict it."
 
 # Validation lives in Node because node is already required to run the server, and
 # because a shell-only JSON parser is a bug waiting to happen. Three lines out, in a
@@ -54,14 +63,20 @@ username=$(printf '%s\n' "$configuration" | sed -n '1p')
 timezone=$(printf '%s\n' "$configuration" | sed -n '2p')
 credential_source=$(printf '%s\n' "$configuration" | sed -n '3p')
 
-[ "$credential_source" = "keychain" ] || die "This configuration stores its password with '$credential_source', which this launcher cannot read. It was written on another platform; re-run scripts/setup-macos.sh on this machine."
+[ "$credential_source" = "$expected_source" ] || die "This configuration stores its password with '$credential_source', which this launcher cannot read. It was written on another platform; re-run $setup_script on this machine."
 
-# Read into a variable rather than exported straight away, so a Keychain denial is
+# Read into a variable rather than exported straight away, so a keyring denial is
 # reported as itself instead of as a Cronometer sign-in failure ten seconds later.
-# The Keychain may prompt on first run: that is the system working.
-password=$(security find-generic-password -s "$keychain_service" -a "$username" -w 2>/dev/null) \
-    || die "No Cronometer password found in the Keychain for $username. Re-run scripts/setup-macos.sh."
-[ -n "$password" ] || die "The Cronometer password stored in the Keychain is empty. Re-run scripts/setup-macos.sh."
+# The Keychain, or a locked KDE Wallet / GNOME Keyring, may prompt on first run: that
+# is the system working.
+if [ "$credential_source" = "keychain" ]; then
+    password=$(security find-generic-password -s "$keychain_service" -a "$username" -w 2>/dev/null) \
+        || die "No Cronometer password found in the Keychain for $username. Re-run $setup_script."
+else
+    password=$(secret-tool lookup service "$keychain_service" account "$username" 2>/dev/null) \
+        || die "No Cronometer password found in the Secret Service keyring for $username. Re-run $setup_script."
+fi
+[ -n "$password" ] || die "The stored Cronometer password is empty. Re-run $setup_script."
 
 # Cleared on every exit path, including a signal. The variables are process-local, so
 # this guards against nothing but a shell that keeps running — which is exactly what

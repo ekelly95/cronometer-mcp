@@ -6,8 +6,8 @@
 // dependency on `jq` — node is already required to run the server at all.
 //
 // It never reads or prints the password. On Windows the ciphertext is in this file
-// and the launcher decrypts it; on macOS the file holds no secret and the password
-// comes from the Keychain.
+// and the launcher decrypts it; on macOS and Linux the file holds no secret and the
+// password comes from the Keychain or the Secret Service keyring.
 //
 // Output is three lines in a fixed order — username, timezone, credential source —
 // so the caller can read them without a parser. Every value is validated to contain
@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-export const CREDENTIAL_SOURCES = ['dpapi', 'keychain'];
+export const CREDENTIAL_SOURCES = ['dpapi', 'keychain', 'libsecret'];
 
 const CONTROL_CHARACTERS = /[\r\n\0]/;
 
