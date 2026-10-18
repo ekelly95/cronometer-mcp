@@ -1,130 +1,128 @@
-# Using the connector from the Claude iPhone app
+# Using the connector from claude.ai and the Claude phone apps
 
-The stdio server works with Claude Code, Claude Desktop and Codex because they start it
-on this computer. Claude's hosted apps — claude.ai on the web, and the iPhone and Android
-apps — cannot. They reach a connector from Anthropic's cloud, as a **custom connector**,
-which means three things:
+Claude Code, Claude Desktop and Codex start the server on your computer. Claude's hosted
+apps — claude.ai on the web, and the iPhone and Android apps — cannot. They reach a
+connector from Anthropic's cloud, as a **custom connector**, which needs:
 
-- the server must answer over **HTTPS on a public address**,
-- it must speak MCP's **Streamable HTTP** transport, and
-- it must sign Claude in with **OAuth** (the hosted apps offer no other way for a personal account).
+- **HTTPS on a public address**,
+- MCP's **Streamable HTTP** transport, and
+- an **OAuth** sign-in.
 
-This repository's answer costs nothing: the server runs on this PC, listens on loopback
-only, and [Tailscale Funnel](https://tailscale.com/kb/1223/tailscale-funnel) gives it a
-stable `https://<pc>.<tailnet>.ts.net` address. A small built-in OAuth server lets exactly
-one person in — whoever knows the owner password you choose.
+`cronometer-mcp serve-http` provides the last two: a Streamable HTTP endpoint with a small
+built-in OAuth server that lets exactly one person in — whoever knows the owner password
+you choose. It listens on `127.0.0.1` only. A tunnel provides the public HTTPS address;
+these steps use [Tailscale Funnel](https://tailscale.com/kb/1223/tailscale-funnel), which
+is free and gives a stable `https://<machine>.<tailnet>.ts.net` name.
 
-**The trade-off:** the phone can use it only while this PC is on, awake and signed in.
-If it is not, Claude says it couldn't reach the connector. Nothing else breaks.
+**The trade-off:** it works while the computer is on, awake and signed in. When it isn't,
+Claude says it couldn't reach the connector; nothing else breaks.
 
-Read [the security notes](#what-this-exposes) before you turn it on.
+Read [what this exposes](#what-this-exposes) before you turn it on.
 
 ## Set up (once)
 
-You need the normal Windows setup done first (`scripts\setup-windows.ps1`) and a paid or
-free Claude account (the free plan allows one custom connector).
+You need `cronometer-mcp setup` done first, and a Claude account (the free plan allows one
+custom connector).
 
-1. **Install Tailscale** for Windows and sign in. The free Personal plan is enough.
-2. In the [Tailscale admin console](https://login.tailscale.com/admin/dns), turn on
-   **MagicDNS** and **HTTPS certificates**.
-3. **Build and configure** the remote connector:
+1. **Install Tailscale** and sign in. In the [admin console](https://login.tailscale.com/admin/dns),
+   turn on **MagicDNS** and **HTTPS certificates**.
 
-   ```powershell
-   npm run build
-   pwsh -File scripts\setup-remote.ps1
+2. **Configure the connector:**
+
+   ```sh
+   npx @ekelly95/cronometer-mcp remote-setup
    ```
 
-   It reads this machine's Tailscale name, asks you to choose an **owner password**
-   (12+ characters — it is stored only as a scrypt hash), and offers to register a
-   Windows logon task so the server starts whenever you sign in.
+   It reads this machine's Tailscale name for the public URL, asks for a local port
+   (default 8787) and an **owner password** (12+ characters, stored only as a scrypt hash),
+   and offers to write a service that starts it when you sign in:
 
-4. **Publish it** with Funnel. `--bg` keeps it on across reboots; the first run may ask
-   you to allow Funnel for this machine in the admin console.
+   | OS | Service | Start it |
+   |---|---|---|
+   | Linux | `~/.config/systemd/user/cronometer-mcp-remote.service` | `systemctl --user daemon-reload && systemctl --user enable --now cronometer-mcp-remote` |
+   | macOS | `~/Library/LaunchAgents/io.github.ekelly95.cronometer-mcp-remote.plist` | `launchctl load <that file>` |
+   | Windows | a Task Scheduler task you create (trigger: at log on) | the command `remote-setup` prints |
 
-   ```powershell
+   To run it in a terminal instead: `npx @ekelly95/cronometer-mcp serve-http`.
+
+3. **Publish the port.** `--bg` keeps Funnel on across reboots; the first run may ask you
+   to allow Funnel for this machine.
+
+   ```sh
    tailscale funnel --bg 8787
    ```
 
-5. **Check it from outside your network** — for example in Safari on the phone with
-   Wi-Fi off. This should show a short JSON document whose `resource` is your MCP URL:
+4. **Check it from outside your network** — for example on your phone with Wi-Fi off. This
+   should show a short JSON document whose `resource` is your MCP URL:
 
    ```text
-   https://<pc>.<tailnet>.ts.net/.well-known/oauth-protected-resource/mcp
+   https://<machine>.<tailnet>.ts.net/.well-known/oauth-protected-resource/mcp
    ```
 
-6. **Add the connector on claude.ai** (on the web — the phone app cannot add one):
+5. **Add the connector on claude.ai** (on the web; the phone app cannot add one):
    **Customize → Connectors → Add custom connector**.
-   - URL: `https://<pc>.<tailnet>.ts.net/mcp`
-   - Leave the OAuth client ID and secret **empty**. Claude registers itself.
-   - Click **Add**, then **Connect**. A sign-in page from your PC opens; enter the owner
-     password and choose **Allow**. The connector should show **Connected**.
+   - URL: `https://<machine>.<tailnet>.ts.net/mcp`
+   - Leave the OAuth client ID and secret **empty**; Claude registers itself.
+   - **Add**, then **Connect**. A sign-in page from your computer opens; enter the owner
+     password and choose **Allow**.
 
-7. **Set tool permissions** on the connector's page: read tools to **Always allow**, and
-   every write and delete tool to **Needs approval** (or **Blocked** if you never want it
-   from the phone). This is the setting that makes Claude ask before changing your diary;
-   don't rely on anything else for that in the hosted apps.
+6. **Set tool permissions** on the connector's page: reads to **Always allow**, every write
+   and delete to **Needs approval** (or **Blocked**). In the hosted apps this setting is what
+   makes Claude ask before changing your diary.
 
-8. **On the iPhone**, start a chat, tap **+ → Connectors**, and switch Cronometer on.
-
-Try "What did I eat yesterday?" first. Then, if you want to see the approval prompt,
-"log one medium banana for today" — approve it, check it in the Cronometer app, and ask
-Claude to remove it.
+7. **On the phone**, start a chat, tap **+ → Connectors**, and switch Cronometer on.
 
 ## Day to day
 
-- **Keep the PC awake while you might use it.** Settings → System → Power → *When plugged
-  in, put my device to sleep after* → **Never**. The logon task starts the server; Funnel
-  restarts by itself.
-- **Logs** are in `%LOCALAPPDATA%\CronometerPersonalMcp\remote\server.log`: one line per
-  request (method, path, status, time), plus startup and helper diagnostics. Query strings,
-  bodies, codes and tokens are never written, and credentials are redacted.
-- **Start or stop it by hand:** `Start-ScheduledTask 'Cronometer MCP (remote)'` /
-  `Stop-ScheduledTask 'Cronometer MCP (remote)'`, or run
-  `pwsh -File scripts\run-mcp.ps1 -Transport http` in a terminal.
-- **Claude Code and Desktop** keep using the stdio server exactly as before. The remote
-  connector keeps its own Cronometer session file, so the two never overwrite each other's.
+- **Keep the computer awake** while you might use it.
+- **Logs** are in `remote/server.log` inside the data directory
+  (`~/.local/share/cronometer-mcp` on Linux, `~/Library/Application Support/cronometer-mcp`
+  on macOS, `%LOCALAPPDATA%\cronometer-mcp` on Windows): one line per request — method,
+  path, status, time — plus startup diagnostics. Query strings, bodies, codes and tokens
+  are never written, and credentials are redacted. The file rotates at 5 MB.
+- The remote connector and the stdio server share the saved setup and session caches.
 
 ## Change the password, disconnect, or turn it off
 
 | To | Do |
 |---|---|
-| Change the owner password | Re-run `scripts\setup-remote.ps1`. Existing connections keep working; only new sign-ins need the new password. |
-| Disconnect every Claude account | Delete `%LOCALAPPDATA%\CronometerPersonalMcp\remote\oauth\state.json` and restart the task. Every token stops working; reconnect from claude.ai. |
-| Take it off the internet | `tailscale funnel --https=443 off` (or `tailscale funnel reset` to clear every Funnel/Serve setting) |
-| Stop it starting at sign-in | `Unregister-ScheduledTask 'Cronometer MCP (remote)'` |
-| Remove it completely | All three of the above, then delete the `remote` folder and the connector in claude.ai. |
+| Change the owner password | Re-run `remote-setup` and restart the service. Existing connections keep working; new sign-ins need the new password. |
+| Disconnect every Claude account | Delete `remote/state/state.json` in the data directory and restart the service. Every token stops working. |
+| Take it off the internet | `tailscale funnel --https=443 off` (or `tailscale funnel reset`) |
+| Stop it starting at sign-in | `systemctl --user disable --now cronometer-mcp-remote` · `launchctl unload <plist>` · delete the scheduled task |
+| Remove it completely | All of the above, then delete the `remote` folder and the connector on claude.ai. |
 
 ## What this exposes
 
-The remote connector is the stdio server's full reach — every read and write tool — made
-available to whoever completes the sign-in. What stands in the way:
+The remote connector has the full reach of the stdio server — every read and write tool —
+for whoever completes the sign-in. (Set `CRONOMETER_READ_ONLY=1` in the service's
+environment to offer reads only.) What stands in the way:
 
 - **The owner password.** Anyone who has it can connect their own Claude account. Make it
-  long and use it nowhere else. After five wrong attempts in fifteen minutes, sign-in is
-  refused for everyone, including you, until the fifteen minutes pass.
+  long and unique. After five wrong attempts in fifteen minutes, sign-in is refused for
+  everyone, including you, until the window passes.
 - **Only Claude can be a client.** Registration accepts only Claude's own callback
-  addresses on claude.ai and claude.com, plus an `http://localhost/callback` (or
-  `127.0.0.1`) address on any port, which is how Claude Code on this machine signs in.
-  A sign-in can never send a code anywhere else.
+  addresses on claude.ai and claude.com, plus `http://localhost/callback` (or `127.0.0.1`)
+  on any port, which is how Claude Code on the same machine signs in. A code can never be
+  sent anywhere else.
 - **Tokens expire and rotate.** Access tokens last an hour. Refresh tokens rotate on every
-  use and lapse after 30 days unused. A spent refresh token presented again within the
-  following seven days revokes the whole connection; after that it is simply refused as
-  unknown. Only hashes are stored on disk.
-- **Loopback only.** The server binds to `127.0.0.1`; Funnel is the only way in, and it
-  rejects any request whose `Host` is not your public name.
+  use and lapse after 30 days unused; a spent one presented again revokes the whole
+  connection. Only hashes are stored.
+- **Loopback only.** The server binds to `127.0.0.1` and rejects any request whose `Host`
+  is not your public name.
 
-What it does not change: Cronometer still sees requests from your home connection, the
-Cronometer password stays DPAPI-encrypted as before, and the same untrusted-data fence
+What it does not change: Cronometer still sees requests from your own connection, the
+Cronometer password stays in your OS credential store, and the same untrusted-data fence
 wraps everything returned to Claude.
 
-Funnel is documented by Tailscale as beta. The design reasoning is in §12 of
-`SECURITY_AUDIT_2026-08-17.md`.
+This is for one person's own account. Running it as a service for other people's accounts
+would be a different thing entirely, and is not what Cronometer's terms allow.
 
-## Moving it off this PC later
+## Running it somewhere else
 
-Nothing in `src/http` is specific to Windows or Tailscale. Any always-on host that can
-run Node and Python, terminate HTTPS, and forward to the loopback port works the same way:
-set `MCP_PUBLIC_URL`, `MCP_STATE_DIR`, `MCP_OWNER_PASSWORD_HASH`, the usual `CRONOMETER_*`
-variables, and run `node dist/http/main.js`. The Cronometer password then lives wherever
-that host keeps secrets rather than in DPAPI, and Cronometer sees a datacenter address
-instead of your home one — both worth weighing before you move it.
+`dist/http/main.js` reads everything from the environment, for a host that keeps secrets
+its own way: set `MCP_PUBLIC_URL`, `MCP_STATE_DIR`, `MCP_OWNER_PASSWORD_HASH` (from
+`remote-setup`'s saved file), optionally `MCP_LISTEN_PORT` and `MCP_LOG_FILE`, plus
+`CRONOMETER_USERNAME`, `CRONOMETER_PASSWORD`, `CRONOMETER_LIVE_ENABLED=1` and
+`CRONOMETER_TIMEZONE`. Put HTTPS in front and forward to the loopback port. Cronometer then
+sees a datacenter address instead of your home one, which is worth weighing first.

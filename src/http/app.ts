@@ -51,7 +51,7 @@ export function createRemoteApp(options: RemoteAppOptions): RemoteApp {
     oauthMetadata: authorization.metadata,
     resourceServerUrl: remote.publicUrl,
     scopesSupported: [SCOPE],
-    resourceName: 'Cronometer (personal)',
+    resourceName: 'Cronometer',
     dangerouslyAllowInsecureIssuerUrl: remote.publicUrl.protocol === 'http:',
   };
 

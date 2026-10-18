@@ -69,7 +69,16 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - run: npm ci
-      - run: npm publish --provenance --access public
+      # The first version of a new package is published by hand (docs/RELEASING.md),
+      # so a version already on npm is skipped rather than failing the release.
+      - name: Publish
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "@ekelly95/cronometer-mcp@$version" version >/dev/null 2>&1; then
+            echo "@ekelly95/cronometer-mcp@$version is already on npm; skipping."
+          else
+            npm publish --provenance --access public
+          fi
 
   github-release:
     needs: [mcpb, npm]
