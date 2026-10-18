@@ -22,6 +22,13 @@ Notable changes, newest first.
   every evening in the Americas. It now uses the diary timezone.
 - `remove_diary_entries` deleted every entry carrying a given id, though ids are unique
   only within a type. An id that names two entries now removes nothing and says so.
+- Tool errors are now also scrubbed of the password read from the OS keyring at the MCP
+  layer, not only in the live backend.
+
+### Changed
+- `setup` and `remote setup` warn when the Node they register belongs to a version
+  manager (nvm, fnm, Volta, asdf, mise, n, nodenv), since that path breaks when the
+  version is switched.
 
 ### Security
 - Remote connector: anyone who could reach `/register` could push the owner's signed-in

@@ -10,7 +10,7 @@ import { startRemoteServer } from '../http/start.js';
 import { ensurePrivateDirectory } from './config.js';
 import { dataDirectory } from './paths.js';
 import { ask, askHidden, confirm } from './prompt.js';
-import { launchCommand } from './register.js';
+import { launchCommand, launchWarning } from './register.js';
 import { resolveRuntime } from './runtime.js';
 
 /**
@@ -169,6 +169,8 @@ on and you are signed in.
       mkdirSync(directory, { recursive: true });
       writeFileSync(unit, systemdUnit(launch.command, launch.args));
       process.stdout.write(`Wrote ${unit}. Start it with:\n  systemctl --user daemon-reload && systemctl --user enable --now ${UNIT_NAME}\n`);
+      const warning = launchWarning(launch);
+      if (warning !== undefined) process.stdout.write(`${warning}\n`);
     }
   } else if (process.platform === 'darwin') {
     const plist = join(homedir(), 'Library', 'LaunchAgents', `${LAUNCH_AGENT}.plist`);

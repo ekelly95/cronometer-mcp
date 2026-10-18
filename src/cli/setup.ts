@@ -8,6 +8,7 @@ import {
   claudeDesktopAvailable,
   codexAvailable,
   launchCommand,
+  launchWarning,
   registerClaudeCode,
   registerClaudeDesktop,
   registerCodex,
@@ -125,6 +126,8 @@ export async function runSetup(options: { readonly register: boolean }): Promise
     if (claudeDesktopAvailable() && (await confirm('Add to Claude Desktop?', true))) results.push(registerClaudeDesktop(launch));
     if (codexAvailable() && (await confirm('Add to Codex?', false))) results.push(registerCodex(launch));
     for (const result of results) process.stdout.write(`• ${result.message}\n`);
+    const warning = launchWarning(launch);
+    if (warning !== undefined) process.stdout.write(`${warning}\n`);
     if (results.length === 0) {
       process.stdout.write(`\nTo add it to an MCP client yourself, run: ${[launch.command, ...launch.args].join(' ')}\n`);
     }

@@ -30,6 +30,35 @@ export function launchCommand(): LaunchCommand {
   return { command: process.execPath, args: [entry] };
 }
 
+/**
+ * The Node version manager that owns `executable`, if any. Their paths name one
+ * Node version, so a client told to run that path breaks once the version is
+ * switched or removed.
+ */
+export function versionManagedNode(executable: string): string | undefined {
+  const path = executable.replace(/\\/g, '/');
+  const managers: readonly (readonly [string, RegExp])[] = [
+    ['nvm', /\/\.nvm\/versions\/|\/nvm\/v\d/i],
+    ['fnm', /\/fnm(_multishells)?\/|\/\.fnm\//i],
+    ['Volta', /\/\.?volta\/tools\/image\//i],
+    ['asdf', /\/\.asdf\/installs\//],
+    ['mise', /\/mise\/installs\//],
+    ['n', /\/n\/versions\/node\//],
+    ['nodenv', /\/\.nodenv\/versions\//],
+  ];
+  return managers.find(([, pattern]) => pattern.test(path))?.[0];
+}
+
+/** A line to print when the launch command depends on a version manager's Node, or undefined. */
+export function launchWarning(launch: LaunchCommand): string | undefined {
+  const manager = versionManagedNode(launch.command);
+  if (manager === undefined) return undefined;
+  return (
+    `Note: ${launch.command} belongs to ${manager}, so it stops working when that Node version is switched or removed. ` +
+    'If that happens, run setup again, or point the client at `npx -y @ekelly95/cronometer-mcp` instead.'
+  );
+}
+
 function has(command: string): boolean {
   const probe = spawnSync(process.platform === 'win32' ? 'where' : 'sh', process.platform === 'win32' ? [command] : ['-c', `command -v ${command}`], {
     encoding: 'utf8',
