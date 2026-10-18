@@ -24,8 +24,9 @@ export const REFRESH_REUSE_GRACE_MS = 60 * 1_000;
 const SPENT_REFRESH_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 /**
  * Dynamic registration gives every fresh connection its own client, so without a
- * ceiling the list only grows. The oldest go first; a connection that still used
- * one gets `invalid_client`, which tells Claude to register again.
+ * ceiling the list only grows. When it is full the oldest client holding no live
+ * token goes first. Registration needs no password, so evicting a signed-in client
+ * would let anyone who knows the address sign the owner out.
  */
 export const MAXIMUM_CLIENTS = 20;
 
@@ -148,10 +149,16 @@ export class OAuthStore {
     }
   }
 
-  public registerClient(redirectUris: readonly string[], clientName: string | undefined): string {
-    const clientId = newSecret();
+  /** The new client's id, or undefined when every slot belongs to a signed-in client. */
+  public registerClient(redirectUris: readonly string[], clientName: string | undefined): string | undefined {
+    const signedIn = this.#clientsWithLiveTokens();
     const clients = Object.entries(this.#state.clients).sort(([, a], [, b]) => a.createdAt - b.createdAt);
-    while (clients.length >= MAXIMUM_CLIENTS) clients.shift();
+    while (clients.length >= MAXIMUM_CLIENTS) {
+      const evictable = clients.findIndex(([id]) => !signedIn.has(id));
+      if (evictable === -1) return undefined;
+      clients.splice(evictable, 1);
+    }
+    const clientId = newSecret();
     const record: ClientRecord = {
       redirectUris: [...redirectUris],
       createdAt: this.#now(),
@@ -160,6 +167,18 @@ export class OAuthStore {
     this.#state = { ...this.#state, clients: Object.fromEntries([...clients, [clientId, record]]) };
     this.#save();
     return clientId;
+  }
+
+  #clientsWithLiveTokens(): Set<string> {
+    const now = this.#now();
+    const live = new Set<string>();
+    for (const record of Object.values(this.#state.accessTokens)) {
+      if (record.expiresAt > now) live.add(record.clientId);
+    }
+    for (const record of Object.values(this.#state.refreshTokens)) {
+      if (record.expiresAt > now && record.spentAt === undefined) live.add(record.clientId);
+    }
+    return live;
   }
 
   public getClient(clientId: string): ClientRecord | undefined {

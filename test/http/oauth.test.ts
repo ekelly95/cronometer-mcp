@@ -24,6 +24,8 @@ import {
   type Harness,
 } from './remote-app.js';
 
+const REGISTRATION_WINDOW = 15 * 60 * 1_000;
+
 const harnesses: Harness[] = [];
 
 async function harness(...args: Parameters<typeof startHarness>): Promise<Harness> {
@@ -116,13 +118,56 @@ describe('registration', () => {
     expect(page.status).toBe(200);
   });
 
-  it('keeps only the newest clients', async () => {
+  /** Registers `count` clients, waiting out the rate limit as needed. */
+  async function registerMany(app: Harness, count: number): Promise<string[]> {
+    const ids: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      if (index > 0 && index % 10 === 0) app.clock.now += REGISTRATION_WINDOW;
+      ids.push(await registeredClient(app));
+    }
+    return ids;
+  }
+
+  it('drops the oldest client that never signed in once the list is full', async () => {
     const app = await harness();
-    const first = await registeredClient(app);
-    for (let index = 0; index < MAXIMUM_CLIENTS; index += 1) await registeredClient(app);
-    const response = await token(app, { grant_type: 'refresh_token', refresh_token: 'x', client_id: first });
+    const [first] = await registerMany(app, MAXIMUM_CLIENTS + 1);
+    const response = await token(app, { grant_type: 'refresh_token', refresh_token: 'x', client_id: first! });
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({ error: 'invalid_client' });
+  });
+
+  it('never drops a signed-in client to make room, however many strangers register', async () => {
+    const app = await harness();
+    const { clientId, tokens } = await signIn(app);
+    app.clock.now += REGISTRATION_WINDOW;
+    await registerMany(app, MAXIMUM_CLIENTS + 5);
+
+    expect((await app.fetch('/mcp', mcpRequest(tokens.access_token))).status).not.toBe(401);
+    const refreshed = await token(app, { grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId });
+    expect(refreshed.status).toBe(200);
+  });
+
+  it('refuses to register when every slot belongs to a signed-in client', async () => {
+    const app = await harness();
+    for (let index = 0; index < MAXIMUM_CLIENTS; index += 1) {
+      if (index > 0 && index % 5 === 0) app.clock.now += REGISTRATION_WINDOW;
+      await signIn(app);
+    }
+    app.clock.now += REGISTRATION_WINDOW;
+    const response = await register(app);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'temporarily_unavailable' });
+  });
+
+  it('allows ten registrations per fifteen minutes', async () => {
+    const app = await harness();
+    for (let index = 0; index < 10; index += 1) expect((await register(app)).status).toBe(201);
+    const limited = await register(app);
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ error: 'temporarily_unavailable' });
+
+    app.clock.now += REGISTRATION_WINDOW;
+    expect((await register(app)).status).toBe(201);
   });
 
   it('refuses a registration that is not JSON', async () => {

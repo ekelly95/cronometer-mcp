@@ -33,6 +33,13 @@ const AUTHORIZATION_CODE_LIFETIME_MS = 60 * 1_000;
 const MAXIMUM_PENDING_CODES = 32;
 const LOCKOUT_WINDOW_MS = 15 * 60 * 1_000;
 const LOCKOUT_THRESHOLD = 5;
+/**
+ * Registration is open to anyone, so it is metered. Claude registers once per new
+ * connection; ten in a window is far more than the owner needs, and it keeps a
+ * stranger from churning the client list faster than a sign-in takes.
+ */
+const REGISTRATION_WINDOW_MS = 15 * 60 * 1_000;
+const REGISTRATION_LIMIT = 10;
 const MAXIMUM_FORM_BYTES = 16 * 1024;
 const MAXIMUM_REDIRECT_URIS = 5;
 const MAXIMUM_CLIENT_NAME = 100;
@@ -186,6 +193,7 @@ export class AuthorizationServer {
   readonly #now: () => number;
   readonly #codes = new Map<string, PendingCode>();
   #failures: number[] = [];
+  #registrations: number[] = [];
   /** One password check at a time, so parallel guesses cannot outrun the lockout. */
   #passwordQueue: Promise<unknown> = Promise.resolve();
 
@@ -282,7 +290,16 @@ export class AuthorizationServer {
     const name = metadata['client_name'];
     const clientName = typeof name === 'string' && name.trim() !== '' ? name.trim().slice(0, MAXIMUM_CLIENT_NAME) : undefined;
 
+    const now = this.#now();
+    this.#registrations = this.#registrations.filter((at) => now - at < REGISTRATION_WINDOW_MS);
+    if (this.#registrations.length >= REGISTRATION_LIMIT) {
+      return oauthError(429, 'temporarily_unavailable', 'Too many registrations; try again in a few minutes.');
+    }
+    this.#registrations.push(now);
     const clientId = this.#store.registerClient(redirectUris, clientName);
+    if (clientId === undefined) {
+      return oauthError(503, 'temporarily_unavailable', 'Every client slot belongs to a signed-in connection. To start over, delete remote/state/state.json in the data directory and restart the server.');
+    }
     return json(201, {
       client_id: clientId,
       client_id_issued_at: Math.floor(this.#now() / 1_000),

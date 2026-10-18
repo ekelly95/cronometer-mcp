@@ -105,6 +105,9 @@ environment to offer reads only.) What stands in the way:
   addresses on claude.ai and claude.com, plus `http://localhost/callback` (or `127.0.0.1`)
   on any port, which is how Claude Code on the same machine signs in. A code can never be
   sent anywhere else.
+- **Registration is metered.** Anyone can register a client, so the server accepts ten
+  registrations per fifteen minutes and keeps at most twenty clients. A full list only
+  ever drops clients that have not signed in, so registering cannot sign you out.
 - **Tokens expire and rotate.** Access tokens last an hour. Refresh tokens rotate on every
   use and lapse after 30 days unused; a spent one presented again revokes the whole
   connection. Only hashes are stored.
