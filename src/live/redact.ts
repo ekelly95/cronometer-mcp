@@ -7,17 +7,17 @@
  * the three — a tool result is transient, whereas a host log is a file on disk
  * that outlives the session. `CLAUDE.md` names logs explicitly for that reason.
  *
- * This covers what the TypeScript process can see, which is the credentials in
- * its own environment. Cookies and the GWT nonce never reach it; those are
- * redacted at source by the Python bridge before anything is written.
+ * Two kinds of secret pass through here: the credentials in the environment, and
+ * the session tokens, cookies and GWT nonce the live clients hold, which are
+ * passed in by value because only the clients know them.
  */
 
-const SECRET_VARIABLES = ['CRONOMETER_USERNAME', 'CRONOMETER_PASSWORD'] as const;
+const SECRET_VARIABLES = ['CRONOMETER_USERNAME', 'CRONOMETER_PASSWORD', 'CRONOMETER_TOTP_SECRET'] as const;
 
 /**
  * A secret does not always come back in the form it was sent. It can arrive
  * JSON-escaped inside a response body or percent-encoded inside a URL, and a
- * plain substring match misses both. Mirrors `_secret_forms` in live_bridge.py.
+ * plain substring match misses both.
  */
 export function secretForms(secret: string): readonly string[] {
   if (secret === '') return [];
@@ -43,6 +43,16 @@ export function redactSecrets(
     for (const form of secretForms(secret)) {
       safe = safe.split(form).join('[redacted]');
     }
+  }
+  return safe;
+}
+
+/** Removes each given secret value, in every form it may take. */
+export function redactValues(text: string, secrets: readonly string[]): string {
+  let safe = text;
+  for (const secret of secrets) {
+    if (secret.length < 6) continue;
+    for (const form of secretForms(secret)) safe = safe.split(form).join('[redacted]');
   }
   return safe;
 }

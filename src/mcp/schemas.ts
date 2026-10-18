@@ -161,6 +161,8 @@ const rangeNutrientBase = {
     })
     .strict(),
   observedSubtotal: z.number(),
+  /** The account's own target for this nutrient, from the live diary only. Either bound may be unset. */
+  target: z.object({ min: z.number().nullable(), max: z.number().nullable() }).strict().optional(),
   dailyComparisons: z.array(
     z
       .object({
@@ -290,7 +292,7 @@ export const exportFolderSchema = z
     /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
     'use only letters, digits, dots, dashes and underscores — no path separators',
   )
-  .describe('Name of one export folder, as listed by cronometer_list_exports.');
+  .describe('Name of one export folder, as listed by list_exports.');
 
 export const exportListOutputSchema = z
   .object({
@@ -318,12 +320,11 @@ export const nutritionOutputSchema = z
   .object({
     ok: z.literal(true),
     /**
-     * Always a downloaded export. A file export carries one row per meal, so a
-     * nutrient's coverage is real and a divergence from Cronometer's own total can
-     * be classified. The live export is pre-aggregated to day totals and can carry
-     * neither, which is why there is no live nutrition summary.
+     * A downloaded export has one row per diary group per day; the live diary has
+     * one row per food entry, which is finer. Either way a nutrient's coverage is
+     * a real count over those rows, named by `coverageUnit`.
      */
-    source: z.literal('cronometer-file-export'),
+    source: z.enum(['cronometer-file-export', 'cronometer-live']),
     data: z
       .object({
         dateRange: z
@@ -333,17 +334,19 @@ export const nutritionOutputSchema = z
           })
           .strict(),
         coverageThreshold: z.number().gt(0).max(1),
+        /** What one coverage observation is: a diary group's row, or one logged food. */
+        coverageUnit: z.enum(['diary-group', 'food-entry']),
         /** Days that had rows. Every nutrient `value` is a sum over exactly these. */
         days: z.array(calendarDaySchema),
         /** Calendar days from `dateRange.start` to `dateRange.end`, inclusive. */
         daysInRange: z.number().int().positive(),
         /**
-         * Days inside the range with no rows at all. They add nothing to any sum,
-         * which is the missing-as-zero trap one level up from a nutrient cell: a
-         * week with two unlogged days still sums to a `value`. Listed so that an
-         * average is taken over the days that were actually logged.
+         * Days inside the range with nothing logged. They add nothing to any sum,
+         * which is the missing-as-zero trap one level up from a nutrient: a week
+         * with two unlogged days still sums to a `value`. Listed so that an average
+         * is taken over the days that were actually logged.
          */
-        daysAbsentFromExport: z.array(calendarDaySchema),
+        daysNotLogged: z.array(calendarDaySchema),
         parseIssues: z.array(parseIssueSchema),
         rowsOutsideRequestedRange: z.number().int().nonnegative(),
         nutrients: z.array(rangeNutrientSchema),
@@ -396,14 +399,15 @@ export const radarSpokeSchema = z.discriminatedUnion('kind', [
 export const radarOutputSchema = z
   .object({
     ok: z.literal(true),
-    source: z.literal('cronometer-file-export'),
+    source: z.enum(['cronometer-file-export', 'cronometer-live']),
     data: z
       .object({
         dateRange: z.object({ start: calendarDaySchema, end: calendarDaySchema }).strict(),
         daysInRange: z.number().int().positive(),
         /** The divisor of every average. */
         daysLogged: z.array(calendarDaySchema),
-        daysAbsentFromExport: z.array(calendarDaySchema),
+        daysNotLogged: z.array(calendarDaySchema),
+        coverageUnit: z.enum(['diary-group', 'food-entry']),
         profile: z.enum(['adult-male', 'adult-female']),
         /** Null means the amino-acid spokes have no reference, not a reference of zero. */
         bodyWeightKg: z.number().positive().nullable(),

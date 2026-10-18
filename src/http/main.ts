@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readConfiguration } from '../config/index.js';
-import { LiveBridge } from '../live/index.js';
+import { CronometerBackend } from '../live/index.js';
 import { createRemoteApp } from './app.js';
 import { readRemoteConfiguration } from './config.js';
 import { createLogger } from './log.js';
@@ -23,7 +23,7 @@ try {
   const remote = readRemoteConfiguration();
   assertPasswordHash(remote.ownerPasswordHash);
 
-  const bridge = new LiveBridge({ diagnostics: log });
+  const bridge = new CronometerBackend({ timeZone: configuration.timeZone, diagnostics: log });
   const store = new OAuthStore(remote.stateDirectory, { diagnostics: log });
   const app = createRemoteApp({ remote, configuration, bridge, store, log });
   const server = serveFetch(app.fetch, (error) => {
