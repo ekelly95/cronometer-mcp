@@ -65,8 +65,34 @@ describe('reading the diary', () => {
     expect(egg?.nutrients['vitaminD']).toBe(80);
     expect(bar?.nutrients).not.toHaveProperty('vitaminD');
     expect(bar?.nutrients).not.toHaveProperty('fiber');
-    expect(result.targets['protein']).toEqual({ min: 150, max: null });
+    expect(result.targets['protein']).toEqual({ min: 150, max: 150 });
     expect(result.targets['vitaminD']).toEqual({ min: 600, max: 4000 });
+  });
+
+  it("takes macro targets from the day's template, not the nutrient profile", async () => {
+    const { value } = await backend().call('get_nutrition_days', { start_date: '2026-08-15', end_date: '2026-08-15' });
+    const { targets } = value as { targets: Record<string, unknown> };
+    expect(targets['energy']).toEqual({ min: 2000, max: 2000 });
+    expect(targets['netCarbs']).toEqual({ min: 190, max: 190 });
+    expect(targets['vitaminD']).toEqual({ min: 600, max: 4000 });
+  });
+
+  it('gives no macro target across days on different templates', async () => {
+    const fake = new FakeCronometer({
+      handlers: {
+        get_diary: (body) => {
+          const day = diaryDay(body['day'] === '2026-8-16' ? '2026-08-16' : '2026-08-15');
+          if (body['day'] !== '2026-8-16') return day;
+          const summary = day['summary'] as Record<string, unknown>;
+          return { ...day, summary: { ...summary, macros: { energy: 2500, protein: 150, total_carbs: 260, carbs: 260, net_carbs: 250, fat: 80 } } };
+        },
+      },
+    });
+    const { value } = await backend(fake).call('get_nutrition_days', { start_date: '2026-08-15', end_date: '2026-08-16' });
+    const { targets } = value as { targets: Record<string, unknown> };
+    expect(targets).not.toHaveProperty('energy');
+    expect(targets).not.toHaveProperty('fat');
+    expect(targets['protein']).toEqual({ min: 150, max: 150 });
   });
 });
 

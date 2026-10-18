@@ -239,6 +239,28 @@ function targetsOf(day: JsonRecord): JsonRecord | null {
   };
 }
 
+/**
+ * The day's macro targets by nutrient, as the app shows them: from the macro
+ * template in effect that day. The account's nutrient profile also carries an
+ * energy target, but that one is a separate default range, not the template's.
+ */
+export function macroTargetsOf(day: JsonRecord): Partial<Record<NutrientId, number>> {
+  const targets = targetsOf(day);
+  if (targets === null) return {};
+  const found: Partial<Record<NutrientId, number>> = {};
+  const pairs: readonly [NutrientId, unknown][] = [
+    ['energy', targets['energy_kcal']],
+    ['protein', targets['protein_g']],
+    ['carbs', targets['carbs_g']],
+    ['netCarbs', targets['net_carbs_g']],
+    ['fat', targets['fat_g']],
+  ];
+  for (const [id, value] of pairs) {
+    if (typeof value === 'number' && value > 0) found[id] = value;
+  }
+  return found;
+}
+
 function consumedOf(day: JsonRecord): JsonRecord | null {
   const summary = isRecord(day['summary']) ? day['summary'] : undefined;
   const consumed = summary !== undefined && isRecord(summary['consumed']) ? summary['consumed'] : undefined;

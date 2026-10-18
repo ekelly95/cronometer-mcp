@@ -2,6 +2,14 @@
 
 Notable changes, newest first.
 
+## Unreleased
+
+### Fixed
+- `get_daily_summary` gave the account profile's default energy range as the energy
+  target instead of the day's macro template. Macro targets (energy, protein, carbs, net
+  carbs, fat) now come from the template in effect, matching the app; over days on
+  different templates, no single target is given.
+
 ## 1.0.0 — 2026-10-18
 
 The first public release, and a rewrite of the live connection.

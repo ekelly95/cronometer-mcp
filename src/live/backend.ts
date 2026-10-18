@@ -6,6 +6,7 @@ import {
   cronometerDay,
   foodIdsIn,
   isRecord,
+  macroTargetsOf,
   metricCatalog,
   nutritionServings,
   shapeDay,
@@ -422,6 +423,16 @@ export class CronometerBackend {
           const id = NUTRIENT_IDS.find((candidate) => MOBILE_NUTRIENT_IDS[candidate] === target['id']);
           if (id === undefined) continue;
           targets[id] = { min: finite(target['min']), max: finite(target['max']) };
+        }
+        // Macro targets come from each day's template. Days on different
+        // templates have no single target, so none is given rather than a wrong one.
+        const daily = raw.map(macroTargetsOf);
+        for (const id of new Set(daily.flatMap((day) => Object.keys(day) as NutrientId[]))) {
+          const values = new Set(daily.map((day) => day[id]).filter((value) => value !== undefined));
+          if (values.size === 1) {
+            const [value] = values;
+            targets[id] = { min: value!, max: value! };
+          } else delete targets[id];
         }
         return done({
           days: raw.map((day, index) => ({
