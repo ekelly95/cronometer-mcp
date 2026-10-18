@@ -5,23 +5,16 @@
 // nested several levels deep. Losing one is losing something that was never ours,
 // and a backup is a consolation rather than a defence.
 //
-// This lives in scripts/ and not src/ on purpose. The server's standing property is
-// that src/parse/export-files.ts is the only code in it that opens a file; a
-// setup-time tool must not weaken that claim.
-//
-// It is shared by the Windows and macOS setup scripts rather than written twice.
-// Two implementations of logic this fiddly drift, and the copy that drifts is the
-// one nobody is running today.
+// Only `cronometer-mcp setup` calls this; the MCP server itself never does.
 
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
-export const SERVER_NAME = 'cronometer-personal';
+export const SERVER_NAME = 'cronometer';
 
 /** Where each platform's Claude Desktop keeps its configuration. */
-export function defaultConfigPath(platform = process.platform, environment = process.env) {
+export function defaultConfigPath(platform: NodeJS.Platform = process.platform, environment: Readonly<NodeJS.ProcessEnv> = process.env): string | undefined {
   if (platform === 'win32') {
     const appData = environment['APPDATA'];
     if (appData === undefined || appData === '') return undefined;
@@ -33,7 +26,7 @@ export function defaultConfigPath(platform = process.platform, environment = pro
   return join(homedir(), '.config', 'Claude', 'claude_desktop_config.json');
 }
 
-function isPlainObject(value) {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -48,14 +41,14 @@ function isPlainObject(value) {
  * standard answer, and this runs once during setup, so the cost of waiting is
  * nothing.
  */
-function renameOverExisting(from, to, attempts = 5) {
+function renameOverExisting(from: string, to: string, attempts = 5): void {
   const transient = new Set(['EPERM', 'EACCES', 'EBUSY']);
   for (let attempt = 1; ; attempt += 1) {
     try {
       renameSync(from, to);
       return;
     } catch (error) {
-      if (attempt >= attempts || !transient.has(error?.code)) throw error;
+      if (attempt >= attempts || !transient.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
       // Synchronous by design: the callers are setup scripts that must finish this
       // before reporting success, and there is nothing else for them to be doing.
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, attempt * 50);
@@ -63,8 +56,8 @@ function renameOverExisting(from, to, attempts = 5) {
   }
 }
 
-function timestamp(now) {
-  const pad = (n) => String(n).padStart(2, '0');
+function timestamp(now: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0');
   return (
     `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
     `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
@@ -80,13 +73,27 @@ function timestamp(now) {
  * refusing is the only safe answer, because repairing someone else's config means
  * guessing what they meant.
  */
+export interface DesktopRegistration {
+  readonly status: 'registered' | 'exists' | 'skipped';
+  readonly message: string;
+  readonly backupPath?: string;
+}
+
 export function registerClaudeDesktopServer({
   configPath,
   command,
   args = [],
+  env,
   serverName = SERVER_NAME,
   now = new Date(),
-}) {
+}: {
+  readonly configPath: string | undefined;
+  readonly command: string;
+  readonly args?: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly serverName?: string;
+  readonly now?: Date;
+}): DesktopRegistration {
   if (typeof configPath !== 'string' || configPath === '') {
     throw new Error('A Claude Desktop configuration path is required.');
   }
@@ -102,14 +109,14 @@ export function registerClaudeDesktopServer({
     };
   }
 
-  let originalText;
-  let config;
+  let originalText: string | undefined;
+  let config: Record<string, unknown>;
   if (existsSync(configPath)) {
     originalText = readFileSync(configPath, 'utf8');
     if (originalText.trim() === '') {
       config = {};
     } else {
-      let parsed;
+      let parsed: unknown;
       try {
         parsed = JSON.parse(originalText);
       } catch {
@@ -130,25 +137,26 @@ export function registerClaudeDesktopServer({
   const baseline = JSON.stringify(config);
   const hadServersKey = Object.hasOwn(config, 'mcpServers');
 
-  if (!hadServersKey) config.mcpServers = {};
-  if (!isPlainObject(config.mcpServers)) {
+  if (!hadServersKey) config['mcpServers'] = {};
+  if (!isPlainObject(config['mcpServers'])) {
     throw new Error(
       'claude_desktop_config.json has an mcpServers value that is not an object; it was left untouched.',
     );
   }
 
-  if (Object.hasOwn(config.mcpServers, serverName)) {
+  const servers = config['mcpServers'] as Record<string, unknown>;
+  if (Object.hasOwn(servers, serverName)) {
     return {
       status: 'exists',
       message: `Claude Desktop already has an MCP server named ${serverName}; it was not overwritten.`,
     };
   }
 
-  config.mcpServers[serverName] = { command, args };
+  servers[serverName] = env === undefined ? { command, args: [...args] } : { command, args: [...args], env: { ...env } };
   const updatedText = `${JSON.stringify(config, null, 2)}\n`;
 
-  const verified = JSON.parse(updatedText);
-  if (!isPlainObject(verified.mcpServers) || !Object.hasOwn(verified.mcpServers, serverName)) {
+  const verified = JSON.parse(updatedText) as Record<string, unknown>;
+  if (!isPlainObject(verified['mcpServers']) || !Object.hasOwn(verified['mcpServers'], serverName)) {
     throw new Error('The Claude Desktop configuration did not gain the server; nothing was written.');
   }
 
@@ -157,16 +165,17 @@ export function registerClaudeDesktopServer({
   // take the result, remove the one entry we added, and require what is left to be
   // identical to the original. Anything else is a bug here, and this file is Claude
   // Desktop's, not ours to experiment on.
-  const residue = JSON.parse(updatedText);
-  delete residue.mcpServers[serverName];
-  if (!hadServersKey && Object.keys(residue.mcpServers).length === 0) delete residue.mcpServers;
+  const residue = JSON.parse(updatedText) as Record<string, unknown>;
+  const residueServers = residue['mcpServers'] as Record<string, unknown>;
+  delete residueServers[serverName];
+  if (!hadServersKey && Object.keys(residueServers).length === 0) delete residue['mcpServers'];
   if (JSON.stringify(residue) !== baseline) {
     throw new Error(
       'Rewriting the Claude Desktop configuration would have changed something other than adding this server; nothing was written.',
     );
   }
 
-  let backupPath;
+  let backupPath: string | undefined;
   if (originalText !== undefined) {
     backupPath = `${configPath}.backup-${timestamp(now)}`;
     writeFileSync(backupPath, originalText, 'utf8');
@@ -188,35 +197,6 @@ export function registerClaudeDesktopServer({
     message:
       `Registered ${serverName} with Claude Desktop.` +
       (backupPath === undefined ? '' : ` The previous configuration was copied to ${backupPath.split(/[\\/]/).pop()}.`),
-    backupPath,
+    ...(backupPath === undefined ? {} : { backupPath }),
   };
-}
-
-// CLI shim, so the shell and PowerShell setup scripts can share this one
-// implementation. Refusals exit non-zero; a skip or an existing entry is not a
-// failure and says so on stdout.
-// pathToFileURL rather than string-building the URL: on Windows a path becomes
-// file:///C:/... with three slashes, and hand-assembling it produces two, so the shim
-// silently never ran and the setup script reported success having done nothing.
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const argv = process.argv.slice(2);
-  const read = (flag) => {
-    const at = argv.indexOf(flag);
-    return at === -1 ? undefined : argv[at + 1];
-  };
-  const separator = argv.indexOf('--');
-  const launcherArgs = separator === -1 ? [] : argv.slice(separator + 1);
-
-  try {
-    const result = registerClaudeDesktopServer({
-      configPath: read('--config') ?? defaultConfigPath(),
-      command: read('--command'),
-      args: launcherArgs,
-    });
-    console.log(result.message);
-    process.exit(0);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  }
 }

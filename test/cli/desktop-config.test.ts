@@ -1,12 +1,10 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
-// @ts-expect-error -- plain ESM setup script, deliberately outside the TypeScript build.
-import { defaultConfigPath, registerClaudeDesktopServer } from '../../scripts/lib/desktop-config.mjs';
+import { defaultConfigPath, registerClaudeDesktopServer } from '../../src/cli/desktop-config.js';
 
 /**
  * These mirror the scenarios scripts/test-setup-windows.ps1 covers, but run through
@@ -77,9 +75,9 @@ describe('an existing configuration keeps everything it had', () => {
     const after = JSON.parse(readFileSync(config, 'utf8'));
 
     expect(result.status).toBe('registered');
-    expect(Object.keys(after.mcpServers)).toContain('cronometer-personal');
+    expect(Object.keys(after.mcpServers)).toContain('cronometer');
     expect(Object.keys(after.mcpServers)).toEqual(
-      expect.arrayContaining(['alpha', 'beta', 'cronometer-personal']),
+      expect.arrayContaining(['alpha', 'beta', 'cronometer']),
     );
     expect(after.mcpServers.beta.env.BETA_LIBRARY).toBe(before.mcpServers.beta.env.BETA_LIBRARY);
     expect(after.userFilesPath).toBe(before.userFilesPath);
@@ -97,8 +95,8 @@ describe('an existing configuration keeps everything it had', () => {
     register(config, '/bin/sh', [LAUNCHER]);
     const after = JSON.parse(readFileSync(config, 'utf8'));
 
-    expect(after.mcpServers['cronometer-personal'].command).toBe('/bin/sh');
-    expect(after.mcpServers['cronometer-personal'].args).toEqual([LAUNCHER]);
+    expect(after.mcpServers['cronometer'].command).toBe('/bin/sh');
+    expect(after.mcpServers['cronometer'].args).toEqual([LAUNCHER]);
   });
 
   it('backs the previous configuration up byte for byte', () => {
@@ -119,7 +117,7 @@ describe('running it twice never overwrites an existing entry', () => {
 
     expect(second.status).toBe('exists');
     expect(second.message).toMatch(/not overwritten/);
-    expect(after.mcpServers['cronometer-personal'].args).toEqual(['/first/run-mcp.sh']);
+    expect(after.mcpServers['cronometer'].args).toEqual(['/first/run-mcp.sh']);
     expect(backupsIn(config)).toHaveLength(1);
   });
 });
@@ -131,7 +129,7 @@ describe('a machine with no Desktop configuration yet', () => {
     const after = JSON.parse(readFileSync(config, 'utf8'));
 
     expect(existsSync(config)).toBe(true);
-    expect(Object.keys(after.mcpServers)).toEqual(['cronometer-personal']);
+    expect(Object.keys(after.mcpServers)).toEqual(['cronometer']);
     expect(backupsIn(config)).toHaveLength(0);
   });
 });
@@ -143,7 +141,7 @@ describe('an empty configuration file is treated as empty, not broken', () => {
       const config = withConfig(contents);
       register(config);
       const after = JSON.parse(readFileSync(config, 'utf8'));
-      expect(Object.keys(after.mcpServers)).toContain('cronometer-personal');
+      expect(Object.keys(after.mcpServers)).toContain('cronometer');
     },
   );
 });
@@ -208,54 +206,6 @@ describe('the deep-nesting guard', () => {
 
     expect(text).toContain('still here');
     expect(text).not.toMatch(/System\.(Management|Collections|Object)/);
-  });
-});
-
-describe('the command-line entry point', () => {
-  // Both setup scripts invoke this file rather than importing it, and the unit tests
-  // above cannot see that path. The first version of the shim compared a
-  // hand-assembled file:// URL against import.meta.url, which never matches on
-  // Windows, so `node desktop-config.mjs` exited 0 having silently done nothing.
-  const script = fileURLToPath(new URL('../../scripts/lib/desktop-config.mjs', import.meta.url));
-
-  function run(args: string[]) {
-    const result = spawnSync(process.execPath, [script, ...args], {
-      encoding: 'utf8',
-      timeout: 30_000,
-    });
-    // Checked here rather than left to a confusing `expected 0, received null`
-    // further down: if the process never started or was killed, that is the finding,
-    // and it is a different problem from the script returning the wrong code.
-    if (result.error !== undefined) throw result.error;
-    if (result.signal !== null) throw new Error(`Helper was killed by ${result.signal}.`);
-    return result;
-  }
-
-  it('registers the server when run as a command', () => {
-    const config = withConfig(REALISTIC);
-    const result = run(['--config', config, '--command', '/bin/sh', '--', LAUNCHER]);
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/Registered/);
-    const after = JSON.parse(readFileSync(config, 'utf8'));
-    expect(after.mcpServers['cronometer-personal'].args).toEqual([LAUNCHER]);
-  });
-
-  it('exits non-zero and writes nothing when the config cannot be understood', () => {
-    const config = withConfig('["not","an","object"]');
-    const result = run(['--config', config, '--command', '/bin/sh', '--', LAUNCHER]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toMatch(/not a JSON object/);
-    expect(readFileSync(config, 'utf8')).toBe('["not","an","object"]');
-  });
-
-  it('exits zero on a skip, because a missing Claude Desktop is not a failure', () => {
-    const missing = join(workspace(), 'no-such-directory', 'claude_desktop_config.json');
-    const result = run(['--config', missing, '--command', '/bin/sh', '--', LAUNCHER]);
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/not installed/);
   });
 });
 

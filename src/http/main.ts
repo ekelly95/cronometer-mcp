@@ -1,55 +1,23 @@
 #!/usr/bin/env node
 
 import { readConfiguration } from '../config/index.js';
-import { CronometerBackend } from '../live/index.js';
-import { createRemoteApp } from './app.js';
 import { readRemoteConfiguration } from './config.js';
 import { createLogger } from './log.js';
-import { serveFetch } from './node-adapter.js';
-import { OAuthStore } from './oauth/store.js';
-import { assertPasswordHash } from './password.js';
+import { startRemoteServer } from './start.js';
 
 /**
- * The remote connector: the same tools as the stdio server, over Streamable HTTP
- * behind OAuth, for Claude's hosted apps. It listens on loopback only. Reaching
- * it from the internet is Tailscale Funnel's job, so nothing on the local network
- * can talk to it directly.
+ * The remote connector, configured entirely from the environment — for
+ * containers and service managers that set MCP_* and CRONOMETER_* themselves.
+ * `cronometer-mcp serve-http` is the usual way in; it reads the saved setup.
  */
 
 const log = createLogger(process.env['MCP_LOG_FILE']);
 
 try {
-  const configuration = readConfiguration();
-  const remote = readRemoteConfiguration();
-  assertPasswordHash(remote.ownerPasswordHash);
-
-  const bridge = new CronometerBackend({ timeZone: configuration.timeZone, diagnostics: log });
-  const store = new OAuthStore(remote.stateDirectory, { diagnostics: log });
-  const app = createRemoteApp({ remote, configuration, bridge, store, log });
-  const server = serveFetch(app.fetch, (error) => {
-    log(`Request failed: ${error instanceof Error ? error.message : 'unknown error'}`);
-  });
-
-  server.on('error', (error) => {
-    log(`Remote connector could not listen on 127.0.0.1:${remote.listenPort}: ${error.message}`);
-    process.exit(1);
-  });
-  server.listen(remote.listenPort, '127.0.0.1', () => {
-    log(`Remote connector listening on http://127.0.0.1:${remote.listenPort}; public endpoint ${remote.publicUrl.href}`);
-  });
-
-  let stopping = false;
-  const stop = async (): Promise<void> => {
-    if (stopping) return;
-    stopping = true;
-    log('Remote connector stopping.');
-    server.close();
-    server.closeAllConnections();
-    await Promise.allSettled([app.close(), bridge.close()]);
-    process.exit(0);
-  };
-  process.on('SIGINT', () => void stop());
-  process.on('SIGTERM', () => void stop());
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[0].startsWith('CRONOMETER_') && entry[1] !== undefined),
+  );
+  startRemoteServer({ configuration: readConfiguration(), remote: readRemoteConfiguration(), environment, log });
 } catch (error) {
   log(`Remote connector failed to start: ${error instanceof Error ? error.message : 'unknown error'}`);
   process.exitCode = 1;

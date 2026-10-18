@@ -1,26 +1,53 @@
 {
-  "name": "cronometer-personal",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Personal local MCP server for coverage-aware Cronometer analysis and explicit live account access.",
+  "name": "@ekelly95/cronometer-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for your Cronometer account: the full diary over Cronometer's mobile API, honest coverage-aware nutrition (missing is never zero), safe writes, and an optional OAuth remote connector.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "cronometer",
+    "nutrition",
+    "claude",
+    "food-log",
+    "macros",
+    "micronutrients"
+  ],
+  "homepage": "https://github.com/ekelly95/cronometer-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/ekelly95/cronometer-mcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ekelly95/cronometer-mcp.git"
+  },
+  "license": "MIT",
+  "author": "Edmund Kelly",
+  "mcpName": "io.github.ekelly95/cronometer-mcp",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "packageManager": "npm@11.17.0",
   "bin": {
-    "cronometer-personal-mcp": "dist/mcp/main.js"
+    "cronometer-mcp": "dist/cli/main.js"
   },
+  "files": [
+    "dist/**/*.js",
+    "!dist/**/*.map",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "pretest": "npm run build",
-    "start": "node dist/mcp/main.js",
-    "start:http": "node dist/http/main.js",
+    "start": "node dist/cli/main.js",
+    "start:http": "node dist/cli/main.js serve-http",
     "test": "vitest run",
-    "test:python": "node scripts/run-python-tests.mjs",
-    "test:setup": "node scripts/run-setup-tests.mjs",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm test && npm run test:python && npm run test:setup"
+    "verify": "npm run typecheck && npm test"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.1",

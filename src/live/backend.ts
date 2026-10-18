@@ -115,6 +115,10 @@ export interface LiveBackendOptions {
   readonly web?: WebClient;
   /** Floor between live calls. Tests set 0. */
   readonly minimumIntervalMs?: number;
+  /** Per-request timeout. Defaults to the HTTP guard's. */
+  readonly timeoutMs?: number;
+  /** Why credentials are unavailable, said instead of a generic error on every live call. */
+  readonly setupProblem?: string;
   readonly diagnostics?: (text: string) => void;
 }
 
@@ -250,19 +254,26 @@ export class CronometerBackend {
   #queue: Promise<void> = Promise.resolve();
   #lastCallAt = 0;
   #catalog: Map<number, { readonly name: string; readonly unit: string }> | undefined;
+  readonly #setupProblem: string | undefined;
 
   public constructor(options: LiveBackendOptions = {}) {
     this.#environment = options.environment ?? process.env;
     this.#timeZone = options.timeZone;
     const directory = this.#environment['CRONOMETER_DATA_DIR']?.trim();
     this.#dataDirectory = directory === undefined || directory === '' ? undefined : directory;
-    const credentials = (): Credentials => readCredentials(this.#environment);
+    const problem = options.setupProblem;
+    const credentials = (): Credentials => {
+      if (problem !== undefined) throw new LiveBackendError(problem);
+      return readCredentials(this.#environment);
+    };
+    this.#setupProblem = problem;
     this.#mobile =
       options.mobile ??
       new MobileClient({
         credentials,
         ...(this.#dataDirectory === undefined ? {} : { sessionPath: join(this.#dataDirectory, '.mobile-session.json') }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
         identity: appIdentity(this.#environment),
       });
     this.#web =
@@ -271,6 +282,7 @@ export class CronometerBackend {
         credentials,
         ...(this.#dataDirectory === undefined ? {} : { sessionPath: join(this.#dataDirectory, '.web-session.json') }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       });
     this.#minimumIntervalMs = options.minimumIntervalMs ?? MINIMUM_INTERVAL_MS;
     this.#diagnostics = options.diagnostics ?? ((line: string): void => void process.stderr.write(line));
@@ -883,6 +895,7 @@ export class CronometerBackend {
       protocol: 'Cronometer mobile API, with the web app protocol for CSV exports, macro templates, fast edits and repeated foods',
       mobile_app_identity: `${identity.appVersion} (build ${identity.buildNumber})`,
       network_hosts: [...ALLOWED_HOSTS],
+      ...(this.#setupProblem === undefined ? {} : { setup_problem: this.#setupProblem }),
     };
   }
 

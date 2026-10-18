@@ -14,7 +14,7 @@ export interface RemoteConfiguration {
   readonly listenPort: number;
   /** Where registered clients and token hashes are kept. */
   readonly stateDirectory: string;
-  /** The owner password's scrypt hash, as written by scripts/lib/hash-password.mjs. */
+  /** The owner password's scrypt hash, as written by `cronometer-mcp remote-setup`. */
   readonly ownerPasswordHash: string;
   /** Host header values accepted: the public name, plus loopback for local checks. */
   readonly allowedHosts: readonly string[];
@@ -27,7 +27,7 @@ export function isLoopbackHost(hostname: string): boolean {
 function required(environment: Readonly<NodeJS.ProcessEnv>, name: string): string {
   const value = environment[name]?.trim();
   if (value === undefined || value === '') {
-    throw new Error(`${name} is required for the remote connector. Start it through scripts\\run-mcp.ps1 -Transport http.`);
+    throw new Error(`${name} is required for the remote connector. Run \`cronometer-mcp remote-setup\` first.`);
   }
   return value;
 }
@@ -69,7 +69,7 @@ export function readRemoteConfiguration(
 
   const ownerPasswordHash = required(environment, OWNER_PASSWORD_HASH_ENVIRONMENT_VARIABLE);
   if (!ownerPasswordHash.startsWith('scrypt$')) {
-    throw new Error(`${OWNER_PASSWORD_HASH_ENVIRONMENT_VARIABLE} is not a hash written by scripts/lib/hash-password.mjs.`);
+    throw new Error(`${OWNER_PASSWORD_HASH_ENVIRONMENT_VARIABLE} is not a hash written by \`cronometer-mcp remote-setup\`.`);
   }
 
   return Object.freeze({

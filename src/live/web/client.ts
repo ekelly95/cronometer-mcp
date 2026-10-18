@@ -85,6 +85,8 @@ export class WebClient {
   readonly #cookies = new CookieJar();
   #session: WebSession | undefined;
   #signingIn: Promise<WebSession> | undefined;
+  /** Cookie values and nonces this process has held and dropped. */
+  readonly #retired: string[] = [];
 
   public constructor(options: WebClientOptions) {
     this.#credentials = options.credentials;
@@ -94,7 +96,7 @@ export class WebClient {
   }
 
   public secrets(): string[] {
-    return [...this.#cookies.values(), ...(this.#session === undefined ? [] : [this.#session.nonce])];
+    return [...this.#retired, ...this.#cookies.values(), ...(this.#session === undefined ? [] : [this.#session.nonce])];
   }
 
   // ── Session ────────────────────────────────────────────────────────────
@@ -214,6 +216,8 @@ export class WebClient {
   }
 
   #discard(): void {
+    this.#retired.push(...this.#cookies.values(), ...(this.#session === undefined ? [] : [this.#session.nonce]));
+    this.#retired.splice(0, Math.max(0, this.#retired.length - 50));
     this.#session = undefined;
     this.#cookies.clear();
     if (this.#sessionPath !== undefined) deleteSessionFile(this.#sessionPath);

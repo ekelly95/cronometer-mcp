@@ -51,8 +51,8 @@ describe('MCP over HTTP', () => {
     const app = await harness();
     const { tokens } = await signIn(app);
     const client = await connect(app, tokens.access_token, 'legacy');
-    await client.callTool({ name: 'cronometer_status', arguments: {} });
-    await client.callTool({ name: 'cronometer_check_connection', arguments: {} });
+    await client.callTool({ name: 'status', arguments: {} });
+    await client.callTool({ name: 'check_connection', arguments: {} });
     expect(app.bridge.calls).toEqual(['status', 'check_connection']);
     expect(app.bridge.closed).toBe(0);
   });
@@ -61,7 +61,7 @@ describe('MCP over HTTP', () => {
     const app = await harness();
     const { tokens } = await signIn(app);
     const client = await connect(app, tokens.access_token, 'modern');
-    const result = await client.callTool({ name: 'cronometer_check_connection', arguments: {} });
+    const result = await client.callTool({ name: 'check_connection', arguments: {} });
     const [first] = result.content as { type: string; text: string }[];
     expect(first?.text).toMatch(/^UNTRUSTED CRONOMETER DATA/);
   });

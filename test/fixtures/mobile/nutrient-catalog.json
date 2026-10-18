@@ -1,0 +1,477 @@
+[
+ {
+  "id": -1205,
+  "name": "Net Carbs",
+  "unit": "g"
+ },
+ {
+  "id": 203,
+  "name": "Protein",
+  "unit": "g"
+ },
+ {
+  "id": 204,
+  "name": "Fat",
+  "unit": "g"
+ },
+ {
+  "id": 205,
+  "name": "Carbs",
+  "unit": "g"
+ },
+ {
+  "id": 207,
+  "name": "Ash",
+  "unit": "g"
+ },
+ {
+  "id": 208,
+  "name": "Energy",
+  "unit": "kcal"
+ },
+ {
+  "id": 209,
+  "name": "Starch",
+  "unit": "g"
+ },
+ {
+  "id": 210,
+  "name": "Sucrose",
+  "unit": "g"
+ },
+ {
+  "id": 211,
+  "name": "Glucose",
+  "unit": "g"
+ },
+ {
+  "id": 212,
+  "name": "Fructose",
+  "unit": "g"
+ },
+ {
+  "id": 213,
+  "name": "Lactose",
+  "unit": "g"
+ },
+ {
+  "id": 214,
+  "name": "Maltose",
+  "unit": "g"
+ },
+ {
+  "id": 221,
+  "name": "Alcohol",
+  "unit": "g"
+ },
+ {
+  "id": 246,
+  "name": "Phytate",
+  "unit": "mg"
+ },
+ {
+  "id": 255,
+  "name": "Water",
+  "unit": "g"
+ },
+ {
+  "id": 262,
+  "name": "Caffeine",
+  "unit": "mg"
+ },
+ {
+  "id": 269,
+  "name": "Sugars",
+  "unit": "g"
+ },
+ {
+  "id": 287,
+  "name": "Galactose",
+  "unit": "g"
+ },
+ {
+  "id": 291,
+  "name": "Fiber",
+  "unit": "g"
+ },
+ {
+  "id": 295,
+  "name": "Soluble Fiber",
+  "unit": "g"
+ },
+ {
+  "id": 297,
+  "name": "Insoluble Fiber",
+  "unit": "g"
+ },
+ {
+  "id": 301,
+  "name": "Calcium",
+  "unit": "mg"
+ },
+ {
+  "id": 303,
+  "name": "Iron",
+  "unit": "mg"
+ },
+ {
+  "id": 304,
+  "name": "Magnesium",
+  "unit": "mg"
+ },
+ {
+  "id": 305,
+  "name": "Phosphorus",
+  "unit": "mg"
+ },
+ {
+  "id": 306,
+  "name": "Potassium",
+  "unit": "mg"
+ },
+ {
+  "id": 307,
+  "name": "Sodium",
+  "unit": "mg"
+ },
+ {
+  "id": 309,
+  "name": "Zinc",
+  "unit": "mg"
+ },
+ {
+  "id": 312,
+  "name": "Copper",
+  "unit": "mg"
+ },
+ {
+  "id": 313,
+  "name": "Fluoride",
+  "unit": "µg"
+ },
+ {
+  "id": 315,
+  "name": "Manganese",
+  "unit": "mg"
+ },
+ {
+  "id": 317,
+  "name": "Selenium",
+  "unit": "µg"
+ },
+ {
+  "id": 319,
+  "name": "Retinol",
+  "unit": "µg"
+ },
+ {
+  "id": 320,
+  "name": "Vitamin A",
+  "unit": "µg"
+ },
+ {
+  "id": 321,
+  "name": "Beta-carotene",
+  "unit": "µg"
+ },
+ {
+  "id": 322,
+  "name": "Alpha-carotene",
+  "unit": "µg"
+ },
+ {
+  "id": 323,
+  "name": "Vitamin E",
+  "unit": "mg"
+ },
+ {
+  "id": 324,
+  "name": "Vitamin D",
+  "unit": "IU"
+ },
+ {
+  "id": 334,
+  "name": "Beta-cryptoxanthin",
+  "unit": "µg"
+ },
+ {
+  "id": 337,
+  "name": "Lycopene",
+  "unit": "µg"
+ },
+ {
+  "id": 338,
+  "name": "Lutein+Zeaxanthin",
+  "unit": "µg"
+ },
+ {
+  "id": 341,
+  "name": "Beta Tocopherol",
+  "unit": "mg"
+ },
+ {
+  "id": 342,
+  "name": "Gamma Tocopherol",
+  "unit": "mg"
+ },
+ {
+  "id": 343,
+  "name": "Delta Tocopherol",
+  "unit": "mg"
+ },
+ {
+  "id": 401,
+  "name": "Vitamin C",
+  "unit": "mg"
+ },
+ {
+  "id": 404,
+  "name": "B1 (Thiamine)",
+  "unit": "mg"
+ },
+ {
+  "id": 405,
+  "name": "B2 (Riboflavin)",
+  "unit": "mg"
+ },
+ {
+  "id": 406,
+  "name": "B3 (Niacin)",
+  "unit": "mg"
+ },
+ {
+  "id": 410,
+  "name": "B5 (Pantothenic Acid)",
+  "unit": "mg"
+ },
+ {
+  "id": 415,
+  "name": "B6 (Pyridoxine)",
+  "unit": "mg"
+ },
+ {
+  "id": 417,
+  "name": "Folate",
+  "unit": "µg"
+ },
+ {
+  "id": 418,
+  "name": "B12 (Cobalamin)",
+  "unit": "µg"
+ },
+ {
+  "id": 421,
+  "name": "Choline",
+  "unit": "mg"
+ },
+ {
+  "id": 430,
+  "name": "Vitamin K",
+  "unit": "µg"
+ },
+ {
+  "id": 501,
+  "name": "Tryptophan",
+  "unit": "g"
+ },
+ {
+  "id": 502,
+  "name": "Threonine",
+  "unit": "g"
+ },
+ {
+  "id": 503,
+  "name": "Isoleucine",
+  "unit": "g"
+ },
+ {
+  "id": 504,
+  "name": "Leucine",
+  "unit": "g"
+ },
+ {
+  "id": 505,
+  "name": "Lysine",
+  "unit": "g"
+ },
+ {
+  "id": 506,
+  "name": "Methionine",
+  "unit": "g"
+ },
+ {
+  "id": 507,
+  "name": "Cystine",
+  "unit": "g"
+ },
+ {
+  "id": 508,
+  "name": "Phenylalanine",
+  "unit": "g"
+ },
+ {
+  "id": 509,
+  "name": "Tyrosine",
+  "unit": "g"
+ },
+ {
+  "id": 510,
+  "name": "Valine",
+  "unit": "g"
+ },
+ {
+  "id": 511,
+  "name": "Arginine",
+  "unit": "g"
+ },
+ {
+  "id": 512,
+  "name": "Histidine",
+  "unit": "g"
+ },
+ {
+  "id": 513,
+  "name": "Alanine",
+  "unit": "g"
+ },
+ {
+  "id": 514,
+  "name": "Aspartic acid",
+  "unit": "g"
+ },
+ {
+  "id": 515,
+  "name": "Glutamic acid",
+  "unit": "g"
+ },
+ {
+  "id": 516,
+  "name": "Glycine",
+  "unit": "g"
+ },
+ {
+  "id": 517,
+  "name": "Proline",
+  "unit": "g"
+ },
+ {
+  "id": 518,
+  "name": "Serine",
+  "unit": "g"
+ },
+ {
+  "id": 521,
+  "name": "Hydroxyproline",
+  "unit": "g"
+ },
+ {
+  "id": 601,
+  "name": "Cholesterol",
+  "unit": "mg"
+ },
+ {
+  "id": 605,
+  "name": "Trans-Fats",
+  "unit": "g"
+ },
+ {
+  "id": 606,
+  "name": "Saturated",
+  "unit": "g"
+ },
+ {
+  "id": 621,
+  "name": "DHA",
+  "unit": "g"
+ },
+ {
+  "id": 629,
+  "name": "EPA",
+  "unit": "g"
+ },
+ {
+  "id": 636,
+  "name": "Phytosterol",
+  "unit": "mg"
+ },
+ {
+  "id": 645,
+  "name": "Monounsaturated",
+  "unit": "g"
+ },
+ {
+  "id": 646,
+  "name": "Polyunsaturated",
+  "unit": "g"
+ },
+ {
+  "id": 675,
+  "name": "LA",
+  "unit": "g"
+ },
+ {
+  "id": 851,
+  "name": "ALA",
+  "unit": "g"
+ },
+ {
+  "id": 853,
+  "name": "AA",
+  "unit": "g"
+ },
+ {
+  "id": 10001,
+  "name": "Omega-3",
+  "unit": "g"
+ },
+ {
+  "id": 10002,
+  "name": "Omega-6",
+  "unit": "g"
+ },
+ {
+  "id": 10003,
+  "name": "Chromium",
+  "unit": "µg"
+ },
+ {
+  "id": 10004,
+  "name": "Biotin",
+  "unit": "µg"
+ },
+ {
+  "id": 10005,
+  "name": "Iodine",
+  "unit": "µg"
+ },
+ {
+  "id": 10007,
+  "name": "Sugar Alcohol",
+  "unit": "g"
+ },
+ {
+  "id": 10008,
+  "name": "Molybdenum",
+  "unit": "µg"
+ },
+ {
+  "id": 10009,
+  "name": "Added Sugars",
+  "unit": "g"
+ },
+ {
+  "id": 10010,
+  "name": "Allulose",
+  "unit": "g"
+ },
+ {
+  "id": 10011,
+  "name": "Beta-Hydroxybutyrate",
+  "unit": "g"
+ },
+ {
+  "id": 10012,
+  "name": "Oxalate",
+  "unit": "mg"
+ }
+]

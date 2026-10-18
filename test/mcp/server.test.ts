@@ -34,6 +34,11 @@ const EXPORTS: Readonly<Record<string, string>> = {
 class FakeBridge implements LiveCaller {
   public readonly calls: { readonly method: LiveMethod; readonly params: JsonObject }[] = [];
   public closed = false;
+  /** One day's food entries, each reporting only the nutrients its food record has. */
+  public servings: JsonObject[] = [
+    { label: 'Breakfast: Egg', nutrients: { energy: 140, protein: 12, fat: 10, vitaminD: 80 } },
+    { label: 'Lunch: Protein bar', nutrients: { energy: 220, protein: 20, fat: 7 } },
+  ];
   public constructor(private readonly exports: Readonly<Record<string, string>> = EXPORTS) {}
 
   public async call(method: LiveMethod, params: JsonObject = {}): Promise<LiveResult> {
@@ -43,6 +48,15 @@ class FakeBridge implements LiveCaller {
       const csv = this.exports[type];
       if (csv === undefined) throw new Error(`fake bridge has no ${type} export`);
       return { value: csv, unverified: false };
+    }
+    if (method === 'get_nutrition_days') {
+      const days = [];
+      const start = Date.parse(`${String(params['start_date'])}T00:00:00Z`);
+      const end = Date.parse(`${String(params['end_date'])}T00:00:00Z`);
+      for (let time = start; time <= end; time += 86_400_000) {
+        days.push({ date: new Date(time).toISOString().slice(0, 10), complete: true, servings: this.servings });
+      }
+      return { value: { days, targets: { protein: { min: 150, max: null } } }, unverified: false };
     }
     if (method === 'status') {
       return {
@@ -156,27 +170,45 @@ afterEach(async () => {
 const range = { start_date: '2026-08-14', end_date: '2026-08-15' } as const;
 
 const validInput: Readonly<Record<string, JsonObject>> = {
-  cronometer_status: {},
-  cronometer_check_connection: {},
-  cronometer_get_food_log: range,
-  cronometer_get_exercises: range,
-  cronometer_get_biometric_log: range,
-  cronometer_get_notes: range,
-  cronometer_export_raw: { ...range, export_type: 'notes' },
-  cronometer_search_foods: { query: 'egg', max_results: 10 },
-  cronometer_get_food_details: { food_source_id: 101 },
-  cronometer_add_food_entry: {
-    food_id: 202,
-    food_source_id: 101,
-    measure_id: 0,
-    quantity: 1,
-    weight_grams: 50,
-    date: '2026-08-15',
-    diary_group: 2,
-  },
-  cronometer_remove_food_entry: { serving_id: 'D80lp$', confirm: true },
-  cronometer_get_macro_targets: { date: '2026-08-15' },
-  cronometer_set_macro_targets: {
+  status: {},
+  check_connection: {},
+  get_diary: { date: '2026-08-15' },
+  get_daily_summary: range,
+  get_nutrition_scores: { date: 'yesterday' },
+  nutrient_radar: { folder: 'gold-complete', body_weight_kg: 70 },
+  search_foods: { query: 'egg', max_results: 10 },
+  get_food_details: { food_id: 101 },
+  lookup_barcode: { barcode: '049000050103' },
+  get_macro_targets: { date: '2026-08-15' },
+  list_macro_templates: {},
+  get_fasting_history: range,
+  get_fasting_stats: {},
+  list_biometric_metrics: {},
+  get_biometrics: { metric_id: 1, ...range },
+  search_activities: { query: 'running' },
+  get_repeated_items: {},
+  list_exports: {},
+  analyze_export: { folder: 'missing-nutrients', coverage_threshold: 1 },
+  export_food_log: range,
+  export_exercises: range,
+  export_biometrics: range,
+  export_notes: range,
+  export_raw: { ...range, export_type: 'notes' },
+  add_food_entry: { food_id: 202, measure_id: 5, quantity: 2, date: 'today', diary_group: 2 },
+  update_food_entry: { serving_id: 5_312_473_825, date: '2026-08-15', grams: 120 },
+  remove_diary_entries: { date: '2026-08-15', entry_ids: [5_312_473_825], confirm: true },
+  copy_day: { source_date: '2026-08-14', destination_date: '2026-08-15', confirm: true },
+  mark_day_complete: { date: '2026-08-15' },
+  add_note: { date: '2026-08-15', text: 'Felt good', diary_group: 1 },
+  update_note: { date: '2026-08-15', note_id: 77, text: 'Felt great' },
+  add_biometric: { metric_id: 1, unit_id: 2, amount: 180, date: '2026-08-15' },
+  add_exercise: { activity_id: 35, minutes: 45, calories_burned: 300, date: '2026-08-15', diary_group: 4 },
+  add_custom_food: { name: 'Protein bar', serving_grams: 60, calories: 220, protein_g: 20, fat_g: 7, carbs_g: 22 },
+  update_custom_food: { food_id: 303, calories: 230 },
+  retire_custom_food: { food_id: 303, confirm: true },
+  add_recipe: { name: 'Oats', ingredients: [{ food_id: 101, grams: 80 }] },
+  import_recipe: { ingredients_text: '80 g rolled oats\n250 ml milk' },
+  set_macro_targets: {
     date: '2026-08-15',
     protein_g: 160,
     fat_g: 70,
@@ -184,37 +216,26 @@ const validInput: Readonly<Record<string, JsonObject>> = {
     calories: 2230,
     template_name: 'Training',
   },
-  cronometer_list_macro_templates: {},
-  cronometer_create_macro_template: {
+  create_macro_template: {
     template_name: 'Rest day',
     protein_g: 160,
     fat_g: 80,
     carbs_g: 180,
     calories: 2080,
   },
-  cronometer_delete_macro_template: { template_id: 3, confirm: true },
-  cronometer_set_macro_schedule_day: { day_of_week: 1, template_id: 3 },
-  cronometer_get_fasting_history: range,
-  cronometer_get_fasting_stats: {},
-  cronometer_delete_fast: { fast_id: 7, confirm: true },
-  cronometer_cancel_active_fast: { fast_id: 8, confirm: true },
-  cronometer_get_recent_biometrics: {},
-  cronometer_add_biometric: { metric_type: 'weight', value: 80, date: '2026-08-15' },
-  cronometer_remove_biometric: { biometric_id: 'bio_10', confirm: true },
-  cronometer_copy_day: { source_date: '2026-08-14', destination_date: '2026-08-15', confirm: true },
-  cronometer_get_repeated_items: {},
-  cronometer_add_repeat_item: {
-    food_source_id: 101,
-    food_id: 202,
+  delete_macro_template: { template_id: 3, confirm: true },
+  set_macro_schedule_day: { weekday: 'monday', template_id: 3 },
+  delete_fast: { fast_id: 7, confirm: true },
+  cancel_active_fast: { fast_id: 8, confirm: true },
+  add_repeat_item: {
+    food_id: 101,
+    measure_id: 202,
     quantity: 1,
     food_name: 'Egg',
     diary_group: 1,
-    days_of_week: [1, 3, 5],
+    weekdays: ['monday', 'wednesday', 'friday'],
   },
-  cronometer_delete_repeat_item: { repeat_item_id: 9, confirm: true },
-  cronometer_list_exports: {},
-  cronometer_analyze_export: { folder: 'missing-nutrients', coverage_threshold: 1 },
-  cronometer_nutrient_radar: { folder: 'gold-complete', body_weight_kg: 70 },
+  delete_repeat_item: { repeat_item_id: 9, confirm: true },
 };
 
 
@@ -261,11 +282,18 @@ describe('declarative MCP registry', () => {
     }
   });
 
-  it('rejects GWT separators, escapes, and replacement markers in live text', () => {
-    const search = LIVE_TOOL_REGISTRY.find(({ name }) => name === 'cronometer_search_foods');
-    expect(search).toBeDefined();
-    for (const query of ['egg|injected', String.raw`egg\!injected`, 'egg{max_results}']) {
-      expect(search?.inputSchema.safeParse({ query, max_results: 10 }).success).toBe(false);
+  it('rejects GWT separators, escapes, and replacement markers in text sent over the web protocol', () => {
+    const targets = LIVE_TOOL_REGISTRY.find(({ name }) => name === 'set_macro_targets');
+    expect(targets).toBeDefined();
+    for (const template_name of ['Cut|injected', String.raw`Cut\!injected`, 'Cut{max}']) {
+      expect(targets?.inputSchema.safeParse({ ...validInput['set_macro_targets'], template_name }).success).toBe(false);
+    }
+  });
+
+  it('says plainly when a write has not been verified against a live account', () => {
+    for (const definition of LIVE_TOOL_REGISTRY) {
+      const flagged = definition.description.includes('Not yet verified against a live account');
+      expect(flagged, definition.name).toBe(definition.access !== 'read' && definition.verified === false);
     }
   });
 });
@@ -306,7 +334,7 @@ describe('MCP protocol surface', () => {
         readOnlyHint: definition.access === 'read',
         destructiveHint: definition.destructive,
         idempotentHint: definition.idempotent,
-        openWorldHint: definition.method !== undefined && definition.method !== 'status',
+        openWorldHint: annotationsFor(definition).openWorldHint,
       });
 
       // Asserted on the wire rather than on the registry, because this is the only
@@ -332,7 +360,7 @@ describe('MCP protocol surface', () => {
     ).map((definition) => definition.name);
 
     expect(flagged.sort()).toEqual(changesAccount.sort());
-    expect(flagged.length).toBe(13);
+    expect(flagged.length).toBe(22);
     // The flag must be exactly the boolean true; Claude Code ignores any other value.
     for (const definition of LIVE_TOOL_REGISTRY.filter((d) => d.access !== 'read')) {
       expect(metaFor(definition)).toEqual({ 'anthropic/requiresUserInteraction': true });
@@ -363,7 +391,7 @@ describe('MCP protocol surface', () => {
     const { client } = await connect();
     await client.listTools();
     const result = await client.callTool({
-      name: 'cronometer_analyze_export',
+      name: 'analyze_export',
       arguments: { folder: 'missing-nutrients', coverage_threshold: 1 },
     });
     const output = result.structuredContent as {
@@ -398,7 +426,7 @@ describe('MCP protocol surface', () => {
     }
 
     it('splits a serving’s quantity from its unit instead of returning one string', async () => {
-      const data = await read('cronometer_get_food_log');
+      const data = await read('export_food_log');
       const rows = data['rows'] as readonly { readonly amount: { value: number; unit: string } }[];
       expect(rows.length).toBeGreaterThan(0);
       for (const row of rows) {
@@ -411,7 +439,7 @@ describe('MCP protocol surface', () => {
     });
 
     it('reports a blank exercise duration as missing, never as zero', async () => {
-      const data = await read('cronometer_get_exercises');
+      const data = await read('export_exercises');
       const rows = data['rows'] as readonly {
         readonly minutes: { kind: string; value?: number };
       }[];
@@ -423,7 +451,7 @@ describe('MCP protocol surface', () => {
     });
 
     it('keeps a biometric in the unit the account displays', async () => {
-      const data = await read('cronometer_get_biometric_log');
+      const data = await read('export_biometrics');
       const rows = data['rows'] as readonly {
         readonly metric: string;
         readonly amount: { unit: string };
@@ -433,7 +461,7 @@ describe('MCP protocol surface', () => {
     });
 
     it('reports an unrecorded time as null rather than midnight', async () => {
-      const data = await read('cronometer_get_biometric_log');
+      const data = await read('export_biometrics');
       const rows = data['rows'] as readonly { readonly time: unknown }[];
       expect(rows.some((row) => row.time === null)).toBe(true);
     });
@@ -442,7 +470,7 @@ describe('MCP protocol surface', () => {
       const injected = fixture('malformed', 'notes.csv');
       const connection = await connectWithBridge(new FakeBridge({ notes: injected }));
       const result = await connection.client.callTool({
-        name: 'cronometer_get_notes',
+        name: 'export_notes',
         arguments: range,
       });
       const text = result.content.find((part) => part.type === 'text')?.text ?? '';
@@ -458,7 +486,7 @@ describe('MCP protocol surface', () => {
 
     it('reports rows it could not read instead of quietly returning fewer', async () => {
       const data = await read(
-        'cronometer_get_food_log',
+        'export_food_log',
         new FakeBridge({ servings: fixture('malformed', 'servings.csv') }),
       );
       const issues = data['issues'] as readonly { readonly line: number; readonly code: string }[];
@@ -477,7 +505,7 @@ describe('MCP protocol surface', () => {
       const withoutAmount = 'Day,Time,Group,Food Name,Category\n2026-08-14,8:00 AM,Breakfast,Egg,Dairy\n';
       const connection = await connectWithBridge(new FakeBridge({ servings: withoutAmount }));
       const result = await connection.client.callTool({
-        name: 'cronometer_get_food_log',
+        name: 'export_food_log',
         arguments: range,
       });
       const text = result.content.find((part) => part.type === 'text')?.text ?? '';
@@ -494,7 +522,7 @@ describe('MCP protocol surface', () => {
       );
       for (const export_type of ['servings', 'daily_summary']) {
         const result = await connection.client.callTool({
-          name: 'cronometer_export_raw',
+          name: 'export_raw',
           arguments: { ...range, export_type },
         });
         const text = result.content.find((part) => part.type === 'text')?.text ?? '';
@@ -508,7 +536,7 @@ describe('MCP protocol surface', () => {
       const live = 'Date,Energy (kcal),Protein (g)\n2026-08-14,2000.00,100.00\n';
       const connection = await connectWithBridge(new FakeBridge({ ...EXPORTS, daily_summary: live }));
       const result = await connection.client.callTool({
-        name: 'cronometer_export_raw',
+        name: 'export_raw',
         arguments: { ...range, export_type: 'daily_summary' },
       });
       expect(result.isError).not.toBe(true);
@@ -516,7 +544,7 @@ describe('MCP protocol surface', () => {
 
     it('reads an empty diary as empty, which is not the same as unreadable', async () => {
       const data = await read(
-        'cronometer_get_food_log',
+        'export_food_log',
         new FakeBridge({ servings: fixture('empty-diary', 'servings.csv') }),
       );
       expect(data['rows']).toEqual([]);
@@ -549,7 +577,7 @@ describe('MCP protocol surface', () => {
       connections.push({ client, server });
       await client.listTools();
       const result = await client.callTool({
-        name: 'cronometer_get_recent_biometrics',
+        name: 'get_repeated_items',
         arguments: {},
       });
       return result.structuredContent as Record<string, unknown>;
@@ -591,7 +619,7 @@ describe('MCP protocol surface', () => {
 
     it('lists the exports it can see, and what each one contains', async () => {
       const client = await connectWithExports(TEST_CONFIGURATION);
-      const result = await client.callTool({ name: 'cronometer_list_exports', arguments: {} });
+      const result = await client.callTool({ name: 'list_exports', arguments: {} });
       const data = (result.structuredContent as { data: { exports: { name: string }[] } }).data;
 
       const names = data.exports.map((entry) => entry.name);
@@ -602,7 +630,7 @@ describe('MCP protocol surface', () => {
     it('refuses a nutrient whose coverage is incomplete, and says why', async () => {
       const client = await connectWithExports(TEST_CONFIGURATION);
       const result = await client.callTool({
-        name: 'cronometer_analyze_export',
+        name: 'analyze_export',
         arguments: { folder: 'missing-nutrients' },
       });
       const data = (
@@ -629,7 +657,7 @@ describe('MCP protocol surface', () => {
 
     it('reports the export directory without the account name', async () => {
       const client = await connectWithExports(TEST_CONFIGURATION);
-      const result = await client.callTool({ name: 'cronometer_list_exports', arguments: {} });
+      const result = await client.callTool({ name: 'list_exports', arguments: {} });
       const data = (result.structuredContent as { data: { exportDirectory: string } }).data;
       const home = homedir();
       if (home !== '') expect(data.exportDirectory).not.toContain(home);
@@ -658,7 +686,7 @@ describe('MCP protocol surface', () => {
 
         const client = await connectWithExports({ timeZone: 'America/New_York', exportDirectory: root });
         const result = await client.callTool({
-          name: 'cronometer_analyze_export',
+          name: 'analyze_export',
           arguments: { folder: 'no-omega3' },
         });
         expect(result.isError).not.toBe(true);
@@ -683,24 +711,24 @@ describe('MCP protocol surface', () => {
     it('names the days in the range that have no rows, rather than summing them as zero', async () => {
       const client = await connectWithExports(TEST_CONFIGURATION);
       const result = await client.callTool({
-        name: 'cronometer_analyze_export',
+        name: 'analyze_export',
         arguments: { folder: 'gold-complete', start_date: '2026-08-13', end_date: '2026-08-17' },
       });
       expect(result.isError).not.toBe(true);
       const data = (
         result.structuredContent as {
-          data: { days: string[]; daysInRange: number; daysAbsentFromExport: string[] };
+          data: { days: string[]; daysInRange: number; daysNotLogged: string[] };
         }
       ).data;
       expect(data.days).toEqual(['2026-08-14', '2026-08-15', '2026-08-16']);
       expect(data.daysInRange).toBe(5);
-      expect(data.daysAbsentFromExport).toEqual(['2026-08-13', '2026-08-17']);
+      expect(data.daysNotLogged).toEqual(['2026-08-13', '2026-08-17']);
     });
 
     it('averages the radar over the days that were logged in its window', async () => {
       const client = await connectWithExports(TEST_CONFIGURATION);
       const result = await client.callTool({
-        name: 'cronometer_nutrient_radar',
+        name: 'nutrient_radar',
         arguments: { folder: 'gold-complete', end_date: '2026-08-17', days: 7 },
       });
       expect(result.isError).not.toBe(true);
@@ -709,7 +737,7 @@ describe('MCP protocol surface', () => {
           data: {
             dateRange: { start: string; end: string };
             daysLogged: string[];
-            daysAbsentFromExport: string[];
+            daysNotLogged: string[];
             bodyWeightKg: number | null;
             spokes: { group: string; reference: unknown }[];
           };
@@ -717,7 +745,7 @@ describe('MCP protocol surface', () => {
       ).data;
       expect(data.dateRange).toEqual({ start: '2026-08-11', end: '2026-08-17' });
       expect(data.daysLogged).toEqual(['2026-08-14', '2026-08-15', '2026-08-16']);
-      expect(data.daysAbsentFromExport).toEqual([
+      expect(data.daysNotLogged).toEqual([
         '2026-08-11',
         '2026-08-12',
         '2026-08-13',
@@ -730,7 +758,7 @@ describe('MCP protocol surface', () => {
     it('refuses a radar window with no diary days instead of drawing an empty week', async () => {
       const client = await connectWithExports(TEST_CONFIGURATION);
       const result = await client.callTool({
-        name: 'cronometer_nutrient_radar',
+        name: 'nutrient_radar',
         arguments: { folder: 'gold-complete', end_date: '2026-09-30' },
       });
       const text = result.content.find((part) => part.type === 'text')?.text ?? '';
@@ -743,7 +771,7 @@ describe('MCP protocol surface', () => {
       // correct, and reads exactly like an empty diary.
       const client = await connectWithExports(TEST_CONFIGURATION);
       const result = await client.callTool({
-        name: 'cronometer_analyze_export',
+        name: 'analyze_export',
         arguments: { folder: 'gold-complete', start_date: '2026-09-01', end_date: '2026-09-07' },
       });
       const text = result.content.find((part) => part.type === 'text')?.text ?? '';
@@ -774,7 +802,7 @@ describe('MCP protocol surface', () => {
 
         const client = await connectWithExports({ timeZone: 'America/New_York', exportDirectory: root });
         const result = await client.callTool({
-          name: 'cronometer_nutrient_radar',
+          name: 'nutrient_radar',
           arguments: { folder: 'no-selenium', body_weight_kg: 70 },
         });
         expect(result.isError).not.toBe(true);
@@ -800,7 +828,7 @@ describe('MCP protocol surface', () => {
       const client = await connectWithExports(TEST_CONFIGURATION);
       for (const folder of ['..', '../secrets', 'a/b', 'C:\\Windows']) {
         const result = await client.callTool({
-          name: 'cronometer_analyze_export',
+          name: 'analyze_export',
           arguments: { folder },
         });
         expect(result.isError, folder).toBe(true);
@@ -809,7 +837,7 @@ describe('MCP protocol surface', () => {
 
     it('says the directory is unconfigured rather than guessing one', async () => {
       const client = await connectWithExports(NO_EXPORT_CONFIGURATION);
-      const result = await client.callTool({ name: 'cronometer_list_exports', arguments: {} });
+      const result = await client.callTool({ name: 'list_exports', arguments: {} });
       const text = result.content.find((part) => part.type === 'text')?.text ?? '';
 
       expect(result.isError).toBe(true);
@@ -830,7 +858,7 @@ describe('MCP protocol surface', () => {
       const message = result.messages[0];
       const text = message?.content.type === 'text' ? message.content.text : '';
       expect(message?.role).toBe('user');
-      expect(text).toContain('`cronometer_nutrient_radar` with that folder, days 14, profile "adult-female"');
+      expect(text).toContain('`nutrient_radar` with that folder, days 14, profile "adult-female"');
       expect(text).toContain('Use the export folder `gold-complete`.');
       expect(text).toContain('do NOT plot it as intake');
       expect(text).toContain('no diagnosis');
@@ -854,12 +882,10 @@ describe('MCP protocol surface', () => {
   });
 
   it('offers no tool that can only fail', () => {
-    // The live daily-summary export has no Group column, so a live coverage summary
-    // always refused; and Cronometer removed setDayComplete. Each still cost a call,
-    // and the write still cost an approval prompt, before failing every time.
+    // Cronometer removed setDayComplete from the web protocol; the mobile API's
+    // set_complete replaced it under a new name.
     const names = LIVE_TOOL_REGISTRY.map((definition) => definition.name);
-    expect(names).not.toContain('cronometer_get_nutrition_summary');
-    expect(names).not.toContain('cronometer_set_day_complete');
+    expect(names).not.toContain('set_day_complete');
     expect(MUTATING_LIVE_METHODS.has('set_day_complete' as LiveMethod)).toBe(false);
   });
 
@@ -875,25 +901,25 @@ describe('MCP protocol surface', () => {
       // least one of start_date, end_date" hint for fasting history.
       const { client } = await connect();
       const { tools } = await client.listTools();
-      for (const name of ['cronometer_get_fasting_history', 'cronometer_get_macro_targets']) {
+      for (const name of ['get_fasting_history', 'get_macro_targets', 'get_diary', 'get_daily_summary']) {
         const listed = tools.find((tool) => tool.name === name);
         expect(listed?.inputSchema.type, name).toBe('object');
         expect(listed?.inputSchema, name).not.toHaveProperty('anyOf');
       }
     });
 
-    it('takes fasting history with both dates or neither', () => {
-      const schema = schemaOf('cronometer_get_fasting_history');
-      expect(schema.safeParse({}).success).toBe(true);
+    it('takes the diary as one date or a range, not both or neither', () => {
+      const schema = schemaOf('get_diary');
+      expect(schema.safeParse({ date: 'today' }).success).toBe(true);
       expect(schema.safeParse(range).success).toBe(true);
+      expect(schema.safeParse({}).success).toBe(false);
       expect(schema.safeParse({ start_date: '2026-08-14' }).success).toBe(false);
-      expect(schema.safeParse({ end_date: '2026-08-15' }).success).toBe(false);
-      expect(schema.safeParse({ start_date: '2026-08-15', end_date: '2026-08-14' }).success).toBe(false);
-      expect(schema.safeParse({ start_date: '2025-01-01', end_date: '2026-08-14' }).success).toBe(false);
+      expect(schema.safeParse({ date: 'today', ...range }).success).toBe(false);
+      expect(schema.safeParse({ date: 'last tuesday' }).success).toBe(false);
     });
 
     it('takes macro targets for one date or for all days, not both or neither', () => {
-      const schema = schemaOf('cronometer_get_macro_targets');
+      const schema = schemaOf('get_macro_targets');
       expect(schema.safeParse({ all_days: true }).success).toBe(true);
       expect(schema.safeParse({ date: '2026-08-15' }).success).toBe(true);
       expect(schema.safeParse({ all_days: false, date: '2026-08-15' }).success).toBe(true);
@@ -903,36 +929,131 @@ describe('MCP protocol surface', () => {
     });
   });
 
-  it('logs food only by the gram measure, and never a zero amount', () => {
-    const schema = LIVE_TOOL_REGISTRY.find(({ name }) => name === 'cronometer_add_food_entry')
-      ?.inputSchema;
-    const valid = validInput['cronometer_add_food_entry'];
+  it('logs food by exactly one of grams or a quantity, and never a zero amount', () => {
+    const schema = LIVE_TOOL_REGISTRY.find(({ name }) => name === 'add_food_entry')?.inputSchema;
+    const valid = validInput['add_food_entry'];
     expect(schema?.safeParse(valid).success).toBe(true);
-    // The client keeps only the low 16 bits of a measure id, so this one would be
-    // sent as a different number.
-    expect(schema?.safeParse({ ...valid, measure_id: 1072101 }).success).toBe(false);
+    expect(schema?.safeParse({ food_id: 202, grams: 50, date: 'today', diary_group: 2 }).success).toBe(true);
+    expect(schema?.safeParse({ ...valid, grams: 50 }).success).toBe(false);
+    expect(schema?.safeParse({ food_id: 202, date: 'today', diary_group: 2 }).success).toBe(false);
     expect(schema?.safeParse({ ...valid, quantity: 0 }).success).toBe(false);
-    expect(schema?.safeParse({ ...valid, weight_grams: 0 }).success).toBe(false);
+    expect(schema?.safeParse({ ...valid, diary_group: 5 }).success).toBe(false);
   });
 
-  it('tells the model where a deletable serving id comes from', () => {
-    // The food log is an export with no serving ids, so "read the diary first"
-    // sent the model looking for something that is not there.
-    const remove = LIVE_TOOL_REGISTRY.find(({ name }) => name === 'cronometer_remove_food_entry');
-    expect(remove?.description).toContain('cronometer_add_food_entry');
-    expect(remove?.description).not.toContain('Read the diary first');
+  it('accepts ids larger than 32 bits, because serving ids already are', () => {
+    const schema = LIVE_TOOL_REGISTRY.find(({ name }) => name === 'remove_diary_entries')?.inputSchema;
+    expect(schema?.safeParse({ date: 'today', entry_ids: [5_312_473_825], confirm: true }).success).toBe(true);
   });
 
   it('strips confirmation before dispatching a deletion', async () => {
     const { client, bridge } = await connect();
     await client.listTools();
     await client.callTool({
-      name: 'cronometer_remove_food_entry',
-      arguments: { serving_id: 'D80lp$', confirm: true },
+      name: 'remove_diary_entries',
+      arguments: { date: '2026-08-15', entry_ids: [5_312_473_825], confirm: true },
     });
     expect(bridge.calls.at(-1)).toEqual({
-      method: 'remove_food_entry',
-      params: { serving_id: 'D80lp$' },
+      method: 'remove_diary_entries',
+      params: { date: '2026-08-15', entry_ids: [5_312_473_825] },
+    });
+  });
+
+  describe('relative dates are resolved in the diary timezone', () => {
+    it('turns "today" into the diary day before the backend sees it', async () => {
+      const { client, bridge } = await connect();
+      await client.listTools();
+      await client.callTool({ name: 'get_diary', arguments: { date: 'today' } });
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: TEST_CONFIGURATION.timeZone }).format(new Date());
+      expect(bridge.calls.at(-1)).toEqual({ method: 'get_diary', params: { start_date: today, end_date: today } });
+    });
+
+    it('turns "3 days ago" into a calendar day', async () => {
+      const { client, bridge } = await connect();
+      await client.listTools();
+      await client.callTool({ name: 'get_nutrition_scores', arguments: { date: '3 days ago' } });
+      const date = bridge.calls.at(-1)?.params['date'];
+      expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+  });
+
+  describe('the live nutrition summary', () => {
+    async function summary(bridge = new FakeBridge()) {
+      const connection = await connectWithBridge(bridge);
+      const result = await connection.client.callTool({ name: 'get_daily_summary', arguments: { date: '2026-08-15' } });
+      expect(result.isError).not.toBe(true);
+      return result.structuredContent as {
+        source: string;
+        data: {
+          coverageUnit: string;
+          days: string[];
+          nutrients: { nutrient: string; kind: string; value?: number; observedSubtotal: number; coverage: { groups: { withData: number; total: number } }; target?: unknown }[];
+        };
+      };
+    }
+
+    it('counts a nutrient one food does not report as missing, not zero', async () => {
+      const output = await summary();
+      expect(output.source).toBe('cronometer-live');
+      expect(output.data.coverageUnit).toBe('food-entry');
+      const vitaminD = output.data.nutrients.find((n) => n.nutrient === 'vitaminD');
+      // One of two foods reports it: a floor of 80, never "80 IU, complete".
+      expect(vitaminD?.kind).toBe('insufficient-data');
+      expect(vitaminD?.observedSubtotal).toBe(80);
+      expect(vitaminD?.coverage.groups).toEqual({ withData: 1, total: 2, ratio: 0.5 });
+      expect(vitaminD).not.toHaveProperty('value');
+    });
+
+    it('reports a nutrient every food carries as a plain value, with the account target', async () => {
+      const output = await summary();
+      const protein = output.data.nutrients.find((n) => n.nutrient === 'protein');
+      expect(protein?.kind).toBe('value');
+      expect(protein?.value).toBe(32);
+      expect(protein?.target).toEqual({ min: 150, max: null });
+    });
+
+    it('refuses a day with nothing logged instead of reporting sixty-one blanks', async () => {
+      const bridge = new FakeBridge();
+      bridge.servings = [];
+      const connection = await connectWithBridge(bridge);
+      const result = await connection.client.callTool({ name: 'get_daily_summary', arguments: { date: '2026-08-15' } });
+      const text = result.content.find((part) => part.type === 'text')?.text ?? '';
+      expect(result.isError).toBe(true);
+      expect(text).toContain('No food is logged');
+    });
+
+    it('draws the live radar from food entries', async () => {
+      const connection = await connectWithBridge(new FakeBridge());
+      const result = await connection.client.callTool({
+        name: 'nutrient_radar',
+        arguments: { end_date: '2026-08-15', days: 3, body_weight_kg: 70 },
+      });
+      expect(result.isError).not.toBe(true);
+      const data = (result.structuredContent as { source: string; data: { coverageUnit: string; daysLogged: string[] } });
+      expect(data.source).toBe('cronometer-live');
+      expect(data.data.coverageUnit).toBe('food-entry');
+      expect(data.data.daysLogged).toEqual(['2026-08-13', '2026-08-14', '2026-08-15']);
+    });
+
+    it('sends a radar longer than the live window to an export instead', async () => {
+      const connection = await connectWithBridge(new FakeBridge());
+      const result = await connection.client.callTool({ name: 'nutrient_radar', arguments: { days: 21 } });
+      const text = result.content.find((part) => part.type === 'text')?.text ?? '';
+      expect(result.isError).toBe(true);
+      expect(text).toContain('at most 14 days');
+    });
+  });
+
+  describe('read-only mode', () => {
+    it('offers no tool that can change the account', async () => {
+      const server = buildServer({ bridge: new FakeBridge(), configuration: TEST_CONFIGURATION, readOnly: true });
+      const client = new Client({ name: 'read-only-test', version: '1.0.0' });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      connections.push({ client, server });
+      const { tools } = await client.listTools();
+      expect(tools.length).toBe(LIVE_TOOL_REGISTRY.filter((definition) => definition.access === 'read').length);
+      expect(tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
     });
   });
 
@@ -975,7 +1096,7 @@ describe('MCP protocol surface', () => {
         async close(): Promise<void> {},
       });
 
-      const result = await client.callTool({ name: 'cronometer_status', arguments: {} });
+      const result = await client.callTool({ name: 'status', arguments: {} });
       const text = result.content.find((part) => part.type === 'text')?.text ?? '';
 
       expect(result.isError).toBe(true);
@@ -993,7 +1114,7 @@ describe('MCP protocol surface', () => {
         async close(): Promise<void> {},
       });
 
-      const result = await client.callTool({ name: 'cronometer_status', arguments: {} });
+      const result = await client.callTool({ name: 'status', arguments: {} });
       const text = result.content.find((part) => part.type === 'text')?.text ?? '';
 
       expect(result.isError).not.toBe(true);
@@ -1020,7 +1141,7 @@ describe('MCP protocol surface', () => {
 
     // A plain passthrough read, to prove the cap is not raw-export-only.
     const result = await client.callTool({
-      name: 'cronometer_get_recent_biometrics',
+      name: 'get_repeated_items',
       arguments: {},
     });
     const text = result.content.find((part) => part.type === 'text')?.text ?? '';
@@ -1045,7 +1166,7 @@ describe('MCP protocol surface', () => {
     connections.push({ client, server });
     await client.listTools();
 
-    const result = await client.callTool({ name: 'cronometer_status', arguments: {} });
+    const result = await client.callTool({ name: 'status', arguments: {} });
     const text = result.content.find((part) => part.type === 'text')?.text ?? '';
     expect(result.isError).toBe(true);
     expect(text).toContain('https://cronometer.com/export');
@@ -1075,7 +1196,7 @@ describe('MCP protocol surface', () => {
       await client.connect(clientTransport);
       connections.push({ client, server });
       await client.listTools();
-      const result = await client.callTool({ name: 'cronometer_status', arguments: {} });
+      const result = await client.callTool({ name: 'status', arguments: {} });
       const text = result.content.find((part) => part.type === 'text')?.text ?? '';
 
       expect(result.isError).toBe(true);

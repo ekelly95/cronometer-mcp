@@ -29,10 +29,12 @@ function currentSize(path: string): number {
 export function createLogger(
   path: string | undefined,
   maximumBytes = MAXIMUM_LOG_BYTES,
+  /** Where the credentials to redact live. The CLI holds them outside process.env. */
+  environment: Readonly<NodeJS.ProcessEnv> = process.env,
 ): (text: string) => void {
   if (path === undefined || path.trim() === '') {
     return (text) => {
-      process.stderr.write(redactSecrets(text.endsWith('\n') ? text : `${text}\n`));
+      process.stderr.write(redactSecrets(text.endsWith('\n') ? text : `${text}\n`, environment));
     };
   }
   let size = currentSize(path);
@@ -40,7 +42,7 @@ export function createLogger(
     const lines = text
       .split(/\r?\n/)
       .filter((line) => line !== '')
-      .map((line) => `${new Date().toISOString()} ${redactSecrets(line)}\n`)
+      .map((line) => `${new Date().toISOString()} ${redactSecrets(line, environment)}\n`)
       .join('');
     if (lines === '') return;
     if (size > maximumBytes) {

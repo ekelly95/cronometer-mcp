@@ -103,6 +103,8 @@ export class MobileClient {
   #session: MobileSession | undefined;
   #profile: AccountProfile | undefined;
   #signingIn: Promise<MobileSession> | undefined;
+  /** Tokens this process has held and dropped. A failure can still echo one. */
+  readonly #retired: string[] = [];
 
   public constructor(options: MobileClientOptions) {
     this.#credentials = options.credentials;
@@ -114,7 +116,7 @@ export class MobileClient {
 
   /** The secrets this client holds right now, for redaction. */
   public secrets(): string[] {
-    return this.#session === undefined ? [] : [this.#session.token];
+    return [...this.#retired, ...(this.#session === undefined ? [] : [this.#session.token])];
   }
 
   public hasCachedSession(): boolean {
@@ -402,6 +404,10 @@ export class MobileClient {
   /** Forget a session, unless a newer one has already replaced the one that failed. */
   #discard(stale?: MobileSession): void {
     if (stale !== undefined && this.#session !== undefined && this.#session.token !== stale.token) return;
+    if (this.#session !== undefined) {
+      this.#retired.push(this.#session.token);
+      this.#retired.splice(0, Math.max(0, this.#retired.length - 10));
+    }
     this.#session = undefined;
     if (this.#sessionPath !== undefined) deleteSessionFile(this.#sessionPath);
   }
