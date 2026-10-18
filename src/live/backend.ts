@@ -17,6 +17,7 @@ import {
   applyCustomFoodUpdate,
   assertPlainCustomFood,
   customFoodPayload,
+  gramMeasure,
   normalizeBarcodes,
   recipePayload,
   resendable,
@@ -972,11 +973,24 @@ export class CronometerBackend {
     const group = integer(params, 'diary_group', 1, 4);
     const food = await this.#food(foodId);
     const measures = Array.isArray(food['measures']) ? food['measures'].filter(isRecord) : [];
-    const measureId = optionalInteger(params, 'measure_id', 0) ?? finite(food['defaultMeasureId']) ?? 0;
-    const measure = measures.find((candidate) => candidate['id'] === measureId);
+    const askedMeasure = optionalInteger(params, 'measure_id', 0);
+    let measureId = askedMeasure ?? finite(food['defaultMeasureId']) ?? 0;
+    let measure = measures.find((candidate) => candidate['id'] === measureId);
 
     let grams = optionalNumber(params, 'grams', 0.001, 100_000);
     const quantity = optionalNumber(params, 'quantity', 0.001, 100_000);
+    // Against a recipe's serving measure, Cronometer reads `grams` as a count of
+    // servings. Weights go against the food's gram measure instead.
+    if (grams !== undefined && measure?.['type'] === 'Recipe') {
+      const gram = askedMeasure === undefined ? gramMeasure(food) : undefined;
+      if (gram === undefined) {
+        throw new LiveBackendError(
+          `Measure ${measureId} of food ${foodId} counts recipe servings, not grams. Give quantity as a number of servings${askedMeasure === undefined ? '' : ', or leave out measure_id to log grams'}.`,
+        );
+      }
+      measure = gram;
+      measureId = finite(gram['id']) ?? 0;
+    }
     if (grams === undefined) {
       if (quantity === undefined) throw new LiveBackendError('Give grams, or a quantity of the chosen measure.');
       const value = measure === undefined ? null : finite(measure['value']);

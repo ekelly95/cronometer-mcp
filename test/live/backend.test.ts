@@ -106,6 +106,28 @@ describe('writing to the diary', () => {
     expect(value).toMatchObject({ serving_id: 5_000_000_009, grams: 150, measure: 'egg' });
   });
 
+  it('logs grams of a recipe against its gram measure, not its serving measure', async () => {
+    const fake = new FakeCronometer();
+    const { value } = await backend(fake).call('add_food_entry', { food_id: 303, grams: 150, date: '2026-08-15', diary_group: 1 });
+    const serving = (fake.calls('/api/v2/add_serving')[0]?.body as { serving: Entry }).serving;
+    expect(serving).toMatchObject({ foodId: 303, measureId: 32, grams: 150 });
+    expect(value).toMatchObject({ measure_id: 32, measure: 'g', grams: 150 });
+  });
+
+  it('logs a quantity of a recipe serving as a count of servings', async () => {
+    const fake = new FakeCronometer();
+    await backend(fake).call('add_food_entry', { food_id: 303, quantity: 2, date: '2026-08-15', diary_group: 1 });
+    const serving = (fake.calls('/api/v2/add_serving')[0]?.body as { serving: Entry }).serving;
+    expect(serving).toMatchObject({ measureId: 31, grams: 2 });
+  });
+
+  it('refuses grams against a recipe serving measure it cannot swap for grams', async () => {
+    const fake = new FakeCronometer();
+    await expect(backend(fake).call('add_food_entry', { food_id: 304, grams: 150, date: '2026-08-15', diary_group: 1 })).rejects.toThrow('counts recipe servings');
+    await expect(backend(fake).call('add_food_entry', { food_id: 303, measure_id: 31, grams: 150, date: '2026-08-15', diary_group: 1 })).rejects.toThrow('leave out measure_id');
+    expect(fake.calls('/api/v2/add_serving')).toHaveLength(0);
+  });
+
   it('refuses a measure the food does not have', async () => {
     await expect(backend().call('add_food_entry', { food_id: 101, measure_id: 999, quantity: 1, date: '2026-08-15', diary_group: 1 })).rejects.toThrow('has no measure 999');
   });

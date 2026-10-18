@@ -63,6 +63,26 @@ export const FOODS: Record<number, Record<string, unknown>> = {
       { id: 205, amount: 40 },
     ],
   },
+  // A recipe whose default measure is a serving: `grams` against it counts servings.
+  303: {
+    id: 303,
+    name: 'Synthetic Stew',
+    source: 'Custom',
+    defaultMeasureId: 31,
+    measures: [
+      { id: 31, name: 'serving', amount: 1, value: 350, type: 'Recipe' },
+      { id: 32, name: 'g', amount: 1, value: 1, type: 'Weight' },
+    ],
+    nutrients: [{ id: 208, amount: 90 }],
+  },
+  304: {
+    id: 304,
+    name: 'Synthetic Soup',
+    source: 'Custom',
+    defaultMeasureId: 41,
+    measures: [{ id: 41, name: 'serving', amount: 1, value: 300, type: 'Recipe' }],
+    nutrients: [{ id: 208, amount: 50 }],
+  },
 };
 
 export function diaryDay(day: string, entries: unknown[] = DEFAULT_ENTRIES(day)): Record<string, unknown> {

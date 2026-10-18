@@ -184,10 +184,14 @@ export interface RecipeIngredient {
   readonly grams: number;
 }
 
-function gramMeasureId(food: JsonRecord): number {
+/** The food's one-gram measure, if it has one. */
+export function gramMeasure(food: JsonRecord): JsonRecord | undefined {
   const measures = Array.isArray(food['measures']) ? food['measures'].filter(isRecord) : [];
-  const gram = measures.find((measure) => measure['name'] === 'g' && measure['value'] === 1);
-  const id = gram?.['id'] ?? food['defaultMeasureId'];
+  return measures.find((measure) => measure['name'] === 'g' && measure['value'] === 1);
+}
+
+function gramMeasureId(food: JsonRecord): number {
+  const id = gramMeasure(food)?.['id'] ?? food['defaultMeasureId'];
   return typeof id === 'number' ? id : 0;
 }
 

@@ -8,6 +8,9 @@ Notable changes, newest first.
 - `add_custom_food` saved 0 for fiber, sugars, sodium and saturated fat when they were
   left out, so the food looked like it reported them. They are now left unset. Foods
   created with 1.0.0–1.0.1 keep their zeros; edit them in the app if that matters.
+- `add_food_entry` with `grams` on a recipe whose default measure is a serving logged that
+  many servings (150 g became 150 servings). Grams now go against the recipe's gram
+  measure, and are refused when it has none.
 
 ### Security
 - Remote connector: anyone who could reach `/register` could push the owner's signed-in
