@@ -105,5 +105,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mcp-publisher
         run: curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+      # The registry checks that the npm version exists, and npm takes a minute or
+      # more to list a version it has just accepted.
+      - name: Wait for npm to list the version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          for attempt in $(seq 1 40); do
+            if npm view "@ekelly95/cronometer-mcp@$version" version --prefer-online >/dev/null 2>&1; then exit 0; fi
+            sleep 15
+          done
+          echo "::error::npm still does not list @ekelly95/cronometer-mcp@$version after 10 minutes."
+          exit 1
       - run: ./mcp-publisher login github-oidc
       - run: ./mcp-publisher publish
