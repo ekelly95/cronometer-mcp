@@ -1126,7 +1126,7 @@ export class CronometerBackend {
 
   async #importRecipe(params: JsonObject): Promise<JsonRecord> {
     const lines = text(params, 'ingredients_text', 10_000);
-    const save = params['save'] !== false;
+    const save = params['save'] === true;
     const started = await this.#read('import_recipe', { url: '', ingredients: lines, enable_async: true, config: { call_version: 1 } });
     if (started['isError'] === true || typeof started['id'] !== 'string' && typeof started['id'] !== 'number') {
       throw new LiveBackendError('Cronometer could not start the recipe import.');

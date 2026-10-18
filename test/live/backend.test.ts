@@ -195,6 +195,23 @@ describe('writing to the diary', () => {
     expect(amount(-1205)).toBe(32);
   });
 
+  it('only previews an imported recipe unless asked to save it', async () => {
+    const imported = {
+      id: 'job-1',
+      result: {
+        recipe: { name: 'Eggs' },
+        entries: [{ rawIngredientImport: '2 eggs', description: 'Egg', ingredient: { foodId: 101, grams: 100 }, servingSizeMatchFound: true }],
+      },
+    };
+    const fake = new FakeCronometer({ handlers: { import_recipe: () => imported } });
+    const { value } = await backend(fake).call('import_recipe', { ingredients_text: '2 eggs' });
+    expect(value).toMatchObject({ saved: false, matched: [{ food_id: 101, grams: 100 }] });
+    expect(fake.calls('/api/v2/add_food')).toHaveLength(0);
+
+    const saved = await backend(fake).call('import_recipe', { ingredients_text: '2 eggs', save: true });
+    expect(saved.value).toMatchObject({ saved: true, food_id: 9001 });
+  });
+
   it('leaves out the optional nutrients a custom food was not given, rather than writing zeros', async () => {
     const fake = new FakeCronometer();
     await backend(fake).call('add_custom_food', { name: 'Bar', serving_grams: 50, calories: 200, protein_g: 20, fat_g: 5, carbs_g: 20, sodium_mg: 0 });

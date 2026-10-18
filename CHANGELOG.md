@@ -11,6 +11,9 @@ Notable changes, newest first.
 - `add_food_entry` with `grams` on a recipe whose default measure is a serving logged that
   many servings (150 g became 150 servings). Grams now go against the recipe's gram
   measure, and are refused when it has none.
+- The live backend treated an `import_recipe` call without `save` as a save. The tool's
+  schema always defaulted to `save: false`, so this was unreachable through MCP; the
+  backend now agrees.
 
 ### Security
 - Remote connector: anyone who could reach `/register` could push the owner's signed-in
