@@ -126,3 +126,6 @@ its own way: set `MCP_PUBLIC_URL`, `MCP_STATE_DIR`, `MCP_OWNER_PASSWORD_HASH` (f
 `CRONOMETER_USERNAME`, `CRONOMETER_PASSWORD`, `CRONOMETER_LIVE_ENABLED=1` and
 `CRONOMETER_TIMEZONE`. Put HTTPS in front and forward to the loopback port. Cronometer then
 sees a datacenter address instead of your home one, which is worth weighing first.
+
+An always-on setup on Fly.io, so the connector works while this computer is off, is
+planned in [`plans/fly-io.md`](plans/fly-io.md).
