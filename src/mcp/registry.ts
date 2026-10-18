@@ -473,7 +473,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: false,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z
       .object({
         food_id: idSchema,
@@ -498,7 +498,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: true,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z
       .object({
         serving_id: idSchema,
@@ -519,7 +519,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: false,
     destructive: true,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: confirmed({
       date: dayInputSchema,
       entry_ids: z.array(idSchema).min(1).max(100).describe('serving_id, exercise_id, note_id or biometric_id values from get_diary.'),
@@ -536,7 +536,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: false,
     destructive: true,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: confirmed({ source_date: dayInputSchema, destination_date: dayInputSchema }),
     toParams: withoutConfirm,
   },
@@ -549,7 +549,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: true,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z.object({ date: dayInputSchema, complete: z.boolean().default(true) }).strict(),
   },
   {
@@ -561,7 +561,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: false,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z.object({ date: dayInputSchema, text: z.string().trim().min(1).max(5_000), diary_group: diaryGroup }).strict(),
   },
   {
@@ -573,7 +573,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: true,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z.object({ date: dayInputSchema, note_id: idSchema, text: z.string().trim().min(1).max(5_000) }).strict(),
   },
   {
@@ -586,7 +586,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: false,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z
       .object({
         metric_id: idSchema,
@@ -605,7 +605,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: false,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z
       .object({
         activity_id: idSchema,
@@ -628,7 +628,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: false,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z
       .object({
         name: z.string().trim().min(1).max(200),
@@ -649,13 +649,13 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
   {
     name: 'update_custom_food',
     title: 'Edit Custom Food',
-    description: 'Change a custom food’s name, serving, or macros (per serving). Only foods created in this account; recipes are refused.',
+    description: 'Change a custom food’s name, serving, or macros (per serving). Only foods created in this account; recipes cannot be edited.',
     method: 'update_custom_food',
     access: 'write',
     idempotent: true,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z
       .object({
         food_id: idSchema,
@@ -672,14 +672,14 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
   },
   {
     name: 'retire_custom_food',
-    title: 'Retire Custom Food',
-    description: 'Retire a custom food: it leaves search and the custom-foods list, while diary entries that use it stay intact.',
+    title: 'Retire Custom Food or Recipe',
+    description: 'Retire a custom food or recipe created in this account: it is marked retired and leaves the custom-foods list, while diary entries that use it stay intact.',
     method: 'retire_custom_food',
     access: 'delete',
     idempotent: true,
     destructive: true,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: confirmed({ food_id: idSchema }),
     toParams: withoutConfirm,
   },
@@ -693,7 +693,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: false,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z
       .object({
         name: z.string().trim().min(1).max(200),
@@ -716,7 +716,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: false,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z
       .object({
         ingredients_text: z.string().trim().min(1).max(10_000).describe('One ingredient per line.'),
@@ -736,7 +736,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: true,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z
       .object({ date: dayInputSchema, ...macroFields, template_name: protocolTextSchema(100, 'Name attached to this target set.') })
       .strict(),
@@ -775,7 +775,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     idempotent: true,
     destructive: false,
     operation: 'passthrough',
-    verified: false,
+    verified: true,
     inputSchema: z.object({ weekday, template_id: z.number().int().min(0).max(2_147_483_647) }).strict(),
   },
 
@@ -810,7 +810,7 @@ const DEFINITIONS: readonly LiveToolDefinition[] = [
     name: 'add_repeat_item',
     title: 'Add Repeated Food',
     description:
-      'Make a food repeat automatically on chosen weekdays. food_id and measure_id come from search_foods (default_measure_id) or get_food_details; quantity is a count of that measure.',
+      'Make a food repeat automatically on chosen weekdays. food_id and measure_id come from search_foods (default_measure_id) or get_food_details; quantity is a count of that measure. The rule is saved and reads back, but which day Cronometer treats as weekday 0 is assumed (Sunday), so ask the user to check the rule in the Cronometer app.',
     method: 'add_repeat_item',
     access: 'write',
     idempotent: false,

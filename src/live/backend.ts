@@ -604,7 +604,13 @@ export class CronometerBackend {
       case 'get_repeated_items': {
         await this.#pace();
         const { items, unverified } = await this.#web.repeatedItems();
-        return done({ items }, unverified);
+        return done(
+          {
+            items,
+            days_of_week_note: 'Weekdays are numbers 0–6, read here as 0 = Sunday, the same numbering add_repeat_item writes. That convention has not been confirmed against the Cronometer app.',
+          },
+          unverified,
+        );
       }
 
       case 'search_activities': {
@@ -780,7 +786,7 @@ export class CronometerBackend {
       case 'retire_custom_food': {
         const foodId = integer(params, 'food_id');
         const food = await this.#food(foodId);
-        assertPlainCustomFood(food, foodId);
+        assertPlainCustomFood(food, foodId, 'retire');
         const copy = resendable(food);
         copy['retired'] = true;
         const response = await this.#write('add_food', { data: copy, config: { call_version: 1 } });

@@ -74,22 +74,22 @@ it.
 | `get_repeated_items` | web · `getRepeatedItems` | verified |
 | `export_*`, `export_raw` | web · `generateAuthorizationToken`, `/export` | verified |
 | `list_exports`, `analyze_export` | local files | local only |
-| `add_food_entry` | mobile · `get_food`, `add_serving` | not yet verified |
-| `update_food_entry` | mobile · `get_diary`, `edit_serving` | not yet verified |
-| `remove_diary_entries` | mobile · `get_diary`, v3 `DELETE diary-entries` | not yet verified |
-| `copy_day` | mobile · `copy` | not yet verified |
-| `mark_day_complete` | mobile · `set_complete` | not yet verified |
-| `add_note`, `update_note` | mobile · `/photoupload` | not yet verified |
-| `add_biometric` | mobile · `add_biometric` | not yet verified |
-| `add_exercise` | mobile · `add_exercise` | not yet verified |
-| `add_custom_food`, `update_custom_food`, `retire_custom_food` | mobile · `get_food`, `add_food` | not yet verified |
-| `add_recipe`, `import_recipe` | mobile · `get_foods`, `import_recipe`, `poll_async_result`, `add_food` | not yet verified |
-| `set_macro_targets` | web · `updateDailyTargetTemplate` | not yet verified |
-| `create_macro_template`, `delete_macro_template` | web · `saveMacroTargetTemplate`, `deleteMacroTargetTemplate` | verified (before 1.0; same request bodies) |
-| `set_macro_schedule_day` | web · `saveMacroSchedule` | not yet verified |
-| `delete_fast`, `cancel_active_fast` | web · `deleteFast`, `cancelFastAndKeepSeries` | not yet verified |
-| `add_repeat_item` | web · `addRepeatItem` | not yet verified (weekday numbering) |
-| `delete_repeat_item` | web · `deleteRepeatItem` | verified (before 1.0; same request body) |
+| `add_food_entry` | mobile · `get_food`, `add_serving` | verified |
+| `update_food_entry` | mobile · `get_diary`, `edit_serving` | verified (grams and diary group) |
+| `remove_diary_entries` | mobile · `get_diary`, v3 `DELETE diary-entries` | verified (food, note, biometric, exercise) |
+| `copy_day` | mobile · `copy` | verified |
+| `mark_day_complete` | mobile · `set_complete` | verified |
+| `add_note`, `update_note` | mobile · `/photoupload` | verified |
+| `add_biometric` | mobile · `add_biometric` | verified (weight) |
+| `add_exercise` | mobile · `add_exercise` | verified |
+| `add_custom_food`, `update_custom_food`, `retire_custom_food` | mobile · `get_food`, `add_food` | verified (retire also covers recipes) |
+| `add_recipe`, `import_recipe` | mobile · `get_foods`, `import_recipe`, `poll_async_result`, `add_food` | verified (import as preview; saving uses `add_recipe`'s payload) |
+| `set_macro_targets` | web · `updateDailyTargetTemplate` | verified |
+| `create_macro_template`, `delete_macro_template` | web · `saveMacroTargetTemplate`, `deleteMacroTargetTemplate` | verified |
+| `set_macro_schedule_day` | web · `saveMacroSchedule` | verified ("monday" changes Monday) |
+| `delete_fast`, `cancel_active_fast` | web · `deleteFast`, `cancelFastAndKeepSeries` | not yet verified (needs an account with fasts) |
+| `add_repeat_item` | web · `addRepeatItem` | saved and read back; which day is weekday 0 not yet confirmed |
+| `delete_repeat_item` | web · `deleteRepeatItem` | verified |
 
 Writes are verified on a throwaway date (1900-01-02) and removed again, so a real diary is
 never touched by a test.

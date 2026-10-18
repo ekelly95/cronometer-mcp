@@ -92,13 +92,17 @@ export function resendable(food: JsonRecord): JsonRecord {
   return copy;
 }
 
-/** Refuses anything but a plain custom food: database foods and recipes are not edited here. */
-export function assertPlainCustomFood(food: JsonRecord, foodId: number): void {
+/**
+ * Refuses anything but a food created in this account. Recipes may be retired —
+ * that re-sends the object untouched apart from its flag — but not edited, since
+ * their nutrients are derived from their ingredients.
+ */
+export function assertPlainCustomFood(food: JsonRecord, foodId: number, purpose: 'edit' | 'retire' = 'edit'): void {
   if (food['source'] !== 'Custom') {
     throw new Error(`Food ${foodId} is not a custom food, so it cannot be changed from here. Only foods created in this account can be edited or retired.`);
   }
-  if (Array.isArray(food['ingredients']) && food['ingredients'].length > 0) {
-    throw new Error(`Food ${foodId} is a recipe. Recipes cannot be edited or retired from here; use the Cronometer app.`);
+  if (purpose === 'edit' && Array.isArray(food['ingredients']) && food['ingredients'].length > 0) {
+    throw new Error(`Food ${foodId} is a recipe. Recipes cannot be edited from here; use the Cronometer app.`);
   }
 }
 
