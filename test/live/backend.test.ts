@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CronometerBackend, LiveBackendError, type JsonObject } from '../../src/live/index.js';
+import { MOBILE_IDS } from '../../src/live/nutrient-ids.js';
 import { FakeCronometer, diaryDay } from './fake-cronometer.js';
 
 const ENVIRONMENT = {
@@ -170,6 +171,19 @@ describe('writing to the diary', () => {
     expect(amount(208)).toBe(400);
     expect(amount(203)).toBe(40);
     expect(amount(-1205)).toBe(32);
+  });
+
+  it('leaves out the optional nutrients a custom food was not given, rather than writing zeros', async () => {
+    const fake = new FakeCronometer();
+    await backend(fake).call('add_custom_food', { name: 'Bar', serving_grams: 50, calories: 200, protein_g: 20, fat_g: 5, carbs_g: 20, sodium_mg: 0 });
+    const data = (fake.calls('/api/v2/add_food')[0]?.body as { data: { nutrients: { id: number; amount: number }[] } }).data;
+    const ids = data.nutrients.map((nutrient) => nutrient.id);
+    expect(ids).not.toContain(MOBILE_IDS.fiber);
+    expect(ids).not.toContain(MOBILE_IDS.sugars);
+    expect(ids).not.toContain(MOBILE_IDS.saturated);
+    // A zero the caller gave is a real value, and is kept.
+    expect(data.nutrients.find((nutrient) => nutrient.id === MOBILE_IDS.sodium)?.amount).toBe(0);
+    expect(data.nutrients.find((nutrient) => nutrient.id === MOBILE_IDS.netCarbs)?.amount).toBe(40);
   });
 });
 

@@ -42,22 +42,26 @@ function weightMeasures(servingName: string, servingGrams: number): JsonRecord[]
 
 export function customFoodPayload(input: CustomFoodInput): JsonRecord {
   const scale = 100 / input.serving_grams;
-  const per100 = (value: number | undefined): number => round((value ?? 0) * scale, 2);
-  const fiber = input.fiber_g ?? 0;
+  const per100 = (value: number): number => round(value * scale, 2);
+  // An optional nutrient left out is unknown, not zero: writing 0 would make the
+  // food claim it reports that nutrient, and coverage would count it as known.
+  const optional = (id: number, value: number | undefined): { id: number; amount: number }[] =>
+    value === undefined ? [] : [{ id, amount: per100(value) }];
   const nutrients = [
     { id: MOBILE_IDS.energy, amount: per100(input.calories) },
     { id: MOBILE_IDS.protein, amount: per100(input.protein_g) },
     { id: MOBILE_IDS.fat, amount: per100(input.fat_g) },
     { id: MOBILE_IDS.carbs, amount: per100(input.carbs_g) },
-    { id: MOBILE_IDS.fiber, amount: per100(fiber) },
-    { id: MOBILE_IDS.sugars, amount: per100(input.sugars_g) },
-    { id: MOBILE_IDS.sodium, amount: per100(input.sodium_mg) },
-    { id: MOBILE_IDS.saturated, amount: per100(input.saturated_fat_g) },
+    ...optional(MOBILE_IDS.fiber, input.fiber_g),
+    ...optional(MOBILE_IDS.sugars, input.sugars_g),
+    ...optional(MOBILE_IDS.sodium, input.sodium_mg),
+    ...optional(MOBILE_IDS.saturated, input.saturated_fat_g),
     { id: -203, amount: per100(input.protein_g) },
     { id: -204, amount: per100(input.fat_g) },
     { id: -205, amount: per100(input.carbs_g) },
     { id: -221, amount: 0 },
-    { id: MOBILE_IDS.netCarbs, amount: per100(Math.max(0, input.carbs_g - fiber)) },
+    // With no fiber given, net carbs are the carbs, as the app shows them.
+    { id: MOBILE_IDS.netCarbs, amount: per100(Math.max(0, input.carbs_g - (input.fiber_g ?? 0))) },
   ];
   return {
     data: {

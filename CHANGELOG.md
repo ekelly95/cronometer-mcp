@@ -2,6 +2,18 @@
 
 Notable changes, newest first.
 
+## Unreleased
+
+### Fixed
+- `add_custom_food` saved 0 for fiber, sugars, sodium and saturated fat when they were
+  left out, so the food looked like it reported them. They are now left unset. Foods
+  created with 1.0.0–1.0.1 keep their zeros; edit them in the app if that matters.
+
+### Security
+- Remote connector: anyone who could reach `/register` could push the owner's signed-in
+  client off the twenty-client list and sign them out. A full list now only drops clients
+  that never signed in, and registration is limited to ten per fifteen minutes.
+
 ## 1.0.1 — 2026-10-18
 
 ### Fixed
