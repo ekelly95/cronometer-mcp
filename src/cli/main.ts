@@ -7,6 +7,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { CronometerBackend } from '../live/index.js';
 import { buildServer } from '../mcp/server.js';
 import { runDoctor } from './doctor.js';
+import { closePrompts } from './prompt.js';
 import { runRemoteSetup, runServeHttp } from './remote.js';
 import { resolveRuntime } from './runtime.js';
 import { runSetup } from './setup.js';
@@ -57,11 +58,11 @@ async function main(argv: readonly string[]): Promise<number | undefined> {
       serve();
       return undefined;
     case 'setup':
-      return runSetup({ register: !rest.includes('--no-register') });
+      return runSetup({ register: !rest.includes('--no-register') }).finally(closePrompts);
     case 'doctor':
       return runDoctor();
     case 'remote-setup':
-      return runRemoteSetup();
+      return runRemoteSetup().finally(closePrompts);
     case 'serve-http':
       runServeHttp();
       return undefined;

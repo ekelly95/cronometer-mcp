@@ -1,0 +1,100 @@
+# On a version tag (v1.2.3): test, publish to npm with provenance, build the
+# Claude Desktop extension (.mcpb) and attach it to a draft GitHub release, then
+# list the new version in the MCP Registry.
+#
+# npm uses trusted publishing (OIDC): configure it once on npmjs.com for this
+# repository and workflow file, and no token is stored here. The very first
+# publish of a new package has to be done by hand (docs/RELEASING.md).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Check the tag matches every version field
+        run: node .github/scripts/check-version.mjs "$GITHUB_REF_NAME"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  mcpb:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Stage the bundle with production dependencies only
+        run: |
+          mkdir -p bundle
+          cp -r dist package.json package-lock.json LICENSE README.md THIRD_PARTY_NOTICES.md packaging/mcpb/manifest.json bundle/
+          (cd bundle && npm ci --omit=dev --ignore-scripts)
+      - name: Validate and pack
+        run: |
+          npx --yes @anthropic-ai/mcpb@2.1.2 validate bundle/manifest.json
+          npx --yes @anthropic-ai/mcpb@2.1.2 pack bundle cronometer-mcp.mcpb
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mcpb
+          path: cronometer-mcp.mcpb
+
+  npm:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      # Trusted publishing and provenance: the OIDC token *is* the credential.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm publish --provenance --access public
+
+  github-release:
+    needs: [mcpb, npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mcpb
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: cronometer-mcp.mcpb
+          draft: true
+          fail_on_unmatched_files: true
+
+  mcp-registry:
+    needs: npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mcp-publisher
+        run: curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+      - run: ./mcp-publisher login github-oidc
+      - run: ./mcp-publisher publish

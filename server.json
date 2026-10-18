@@ -1,0 +1,61 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ekelly95/cronometer-mcp",
+  "title": "Cronometer",
+  "description": "Your Cronometer diary, nutrition with honest coverage (missing is never zero), and safe writes.",
+  "repository": {
+    "url": "https://github.com/ekelly95/cronometer-mcp",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@ekelly95/cronometer-mcp",
+      "version": "1.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CRONOMETER_USERNAME",
+          "description": "Cronometer account email. Optional if `npx @ekelly95/cronometer-mcp setup` saved it.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "CRONOMETER_PASSWORD",
+          "description": "Cronometer password. Optional if setup saved it to the OS keyring.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "CRONOMETER_LIVE_ENABLED",
+          "description": "Set to 1 to accept the risks of unofficial access when using environment credentials.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "CRONOMETER_TOTP_SECRET",
+          "description": "Base32 authenticator key, for accounts with two-factor sign-in.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "CRONOMETER_TIMEZONE",
+          "description": "Diary timezone, e.g. America/New_York. Defaults to the saved setup, else this computer's.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "CRONOMETER_READ_ONLY",
+          "description": "Set to 1 to offer no tool that can change the account.",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { cpSync, existsSync } from 'node:fs';
 
+import { liveEnabled } from '../live/credentials.js';
 import { directoryIsPrivate, ensurePrivateDirectory, readLiveConfig, writeLiveConfig, type LiveConfig } from './config.js';
 import { dpapiUnprotect, keyringFor } from './keyring.js';
 import { LEGACY_KEYRING_SERVICE, KEYRING_SERVICE, configFile, dataDirectory, exportsDirectory, legacyDataDirectory } from './paths.js';
@@ -90,6 +91,15 @@ export function resolveRuntime(environment: Readonly<NodeJS.ProcessEnv> = proces
   }
 
   if (environment['CRONOMETER_USERNAME'] && environment['CRONOMETER_PASSWORD']) {
+    // Sessions are still cached in the private data directory, so a client that
+    // restarts the server often does not sign in every time (Cronometer
+    // rate-limits sign-ins). Memory only if the directory cannot be made.
+    let cached = true;
+    try {
+      ensurePrivateDirectory(directory);
+    } catch {
+      cached = false;
+    }
     return {
       environment: {
         ...passed,
@@ -97,13 +107,13 @@ export function resolveRuntime(environment: Readonly<NodeJS.ProcessEnv> = proces
         CRONOMETER_USERNAME: environment['CRONOMETER_USERNAME'],
         CRONOMETER_PASSWORD: environment['CRONOMETER_PASSWORD'],
         ...(environment['CRONOMETER_TOTP_SECRET'] ? { CRONOMETER_TOTP_SECRET: environment['CRONOMETER_TOTP_SECRET'] } : {}),
-        ...(environment['CRONOMETER_DATA_DIR'] ? { CRONOMETER_DATA_DIR: directory } : {}),
+        ...(cached ? { CRONOMETER_DATA_DIR: directory } : {}),
       },
       timeZone: environment['CRONOMETER_TIMEZONE']?.trim() || systemTimeZone(),
-      exportDirectory: environment['CRONOMETER_DATA_DIR'] || environment['CRONOMETER_EXPORT_DIR'] ? exportDirectory : undefined,
+      exportDirectory: cached ? exportDirectory : undefined,
       dataDirectory: directory,
       source: 'environment',
-      ...(environment['CRONOMETER_LIVE_ENABLED'] ? {} : { problem: 'Credentials are set in the environment but CRONOMETER_LIVE_ENABLED is not. Set it to 1 to accept the risk of unofficial access.' }),
+      ...(liveEnabled(environment) ? {} : { problem: 'Credentials are set in the environment but live access is not enabled. Set CRONOMETER_LIVE_ENABLED=1 to accept the risk of unofficial access.' }),
     };
   }
 

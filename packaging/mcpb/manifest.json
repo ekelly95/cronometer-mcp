@@ -1,0 +1,86 @@
+{
+  "manifest_version": "0.3",
+  "name": "cronometer-mcp",
+  "display_name": "Cronometer",
+  "version": "1.0.0",
+  "description": "Your Cronometer diary, nutrition with honest coverage, and safe writes.",
+  "long_description": "Reads and writes your Cronometer diary through Cronometer's mobile app interface: foods with ids, targets and what remains today, exercise, notes, biometrics, fasting, custom foods and recipes. Nutrition summaries are computed food by food, so a nutrient a food does not report is shown as missing rather than silently counted as zero. Every write asks for approval.\n\nCronometer has no public API; this uses the same private interfaces as its app and website. That is unofficial and may break, and Cronometer could restrict an account it sees automated. Not affiliated with Cronometer.",
+  "author": {
+    "name": "Edmund Kelly",
+    "url": "https://github.com/ekelly95"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ekelly95/cronometer-mcp.git"
+  },
+  "homepage": "https://github.com/ekelly95/cronometer-mcp",
+  "support": "https://github.com/ekelly95/cronometer-mcp/issues",
+  "license": "MIT",
+  "keywords": ["cronometer", "nutrition", "diet", "macros", "micronutrients", "food log"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/cli/main.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/cli/main.js"],
+      "env": {
+        "CRONOMETER_USERNAME": "${user_config.username}",
+        "CRONOMETER_PASSWORD": "${user_config.password}",
+        "CRONOMETER_TOTP_SECRET": "${user_config.totp_secret}",
+        "CRONOMETER_TIMEZONE": "${user_config.timezone}",
+        "CRONOMETER_LIVE_ENABLED": "${user_config.accept_risk}",
+        "CRONOMETER_READ_ONLY": "${user_config.read_only}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": { "node": ">=20.0.0" }
+  },
+  "user_config": {
+    "username": {
+      "type": "string",
+      "title": "Cronometer email",
+      "description": "The email you sign in to Cronometer with.",
+      "required": true
+    },
+    "password": {
+      "type": "string",
+      "title": "Cronometer password",
+      "description": "Kept by Claude Desktop in your operating system's credential store.",
+      "sensitive": true,
+      "required": true
+    },
+    "totp_secret": {
+      "type": "string",
+      "title": "Two-factor key (optional)",
+      "description": "Only if your account uses an authenticator app: the base32 key shown when two-factor was set up.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "timezone": {
+      "type": "string",
+      "title": "Diary timezone",
+      "description": "IANA name such as America/New_York. Leave blank to use this computer's.",
+      "required": false,
+      "default": ""
+    },
+    "accept_risk": {
+      "type": "boolean",
+      "title": "I understand this uses Cronometer's unofficial interfaces",
+      "description": "It may break, and Cronometer could restrict an account it sees automated. Required for live access.",
+      "required": true,
+      "default": false
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only",
+      "description": "Offer no tool that can change the account.",
+      "required": false,
+      "default": false
+    }
+  }
+}

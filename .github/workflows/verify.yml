@@ -1,17 +1,7 @@
-# Deliberately partial.
-#
-# This runs the typecheck and the TypeScript suite — the parsers, the coverage
-# analysis, the MCP surface, the untrusted-data boundary, and the setup helpers the
-# two platforms share — and the Python bridge tests, in the same hash-locked `uv`
-# environment the setup scripts build. What it cannot run is anything live: no job
-# here has Cronometer credentials, by design. `npm run verify` locally remains the
-# complete check.
-#
-# The macOS job exists because this project claims macOS support it cannot fully
-# prove. The parts that are pure code — the Claude Desktop config writer, the
-# configuration validator, every parser — are checked there on every push, so the
-# unproven remainder is narrowed to the three things that genuinely need a Mac with a
-# person at it: the Keychain, the directory mode, and one live run.
+# Typecheck and the full test suite on the three platforms the package claims.
+# Nothing here has Cronometer credentials, by design: every test is offline and
+# uses synthetic fixtures. Live behaviour is checked by hand before a release
+# (docs/RELEASING.md).
 name: verify
 
 on:
@@ -20,21 +10,24 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     strategy:
       fail-fast: false
       matrix:
-        # Windows is where this has actually been run. macOS is the platform being
-        # claimed, so it is the one worth watching.
-        os: [windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 24]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned to commits; the comment says which release.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version-file: .nvmrc
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - run: npm ci
@@ -42,56 +35,20 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # Runs the build first via pretest, so this also proves the package compiles.
-      - name: TypeScript tests
+      # pretest builds first, so this also proves the package compiles.
+      - name: Tests
         run: npm test
 
-      # Windows only: these drive setup-windows.ps1, which exists nowhere else.
-      - name: Windows setup tests
-        if: runner.os == 'Windows'
-        run: npm run test:setup
-
-  python:
-    # The vendored client's parsers and the bridge's input validation. These run
-    # without network access to Cronometer; the lock file is installed with
-    # --require-hashes exactly as the setup scripts do.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-
-      # setup-uv publishes no moving major tag, so this names an exact release.
-      - uses: astral-sh/setup-uv@v10.2.0
-
-      - name: Locked Python environment
+      - name: The published package contains what it should
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 24
         run: |
-          uv venv .venv-live --python 3.12
-          uv pip sync python/requirements-live.lock --python .venv-live/bin/python --require-hashes
-
-      - name: Python tests
-        run: npm run test:python
-
-  shell:
-    # The shell scripts are authored on Windows and cannot be run there. shellcheck is
-    # the closest thing to a second opinion available without a Mac, and it catches
-    # the quoting mistakes that turn a path with a space into two arguments.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: shellcheck
-        run: shellcheck --shell=sh scripts/run-mcp.sh scripts/setup-macos.sh scripts/setup-linux.sh
-
-      - name: Refuse CRLF in shell scripts
-        # A carriage return becomes part of the interpreter path and the script dies
-        # with "bad interpreter". .gitattributes prevents this; here is where we find
-        # out if that ever stops being true.
-        run: |
-          if grep -lU $'\r' scripts/*.sh; then
-            echo "The files above contain CRLF line endings and will not run on macOS."
-            exit 1
-          fi
-          echo "No CRLF found."
+          npm pack --dry-run --json > pack.json
+          node -e "
+            const files = Object.values(JSON.parse(require('fs').readFileSync('pack.json','utf8')))[0].files.map(f => f.path);
+            for (const needed of ['dist/cli/main.js', 'dist/mcp/server.js', 'README.md', 'LICENSE']) {
+              if (!files.includes(needed)) { console.error('missing from package:', needed); process.exit(1); }
+            }
+            const stray = files.filter(f => /^(test|src|docs)\//.test(f) || f.endsWith('.map'));
+            if (stray.length) { console.error('should not be packaged:', stray); process.exit(1); }
+            console.log(files.length + ' files, all expected.');
+          "

@@ -96,11 +96,23 @@ describe('where things live', () => {
 
 describe('the runtime', () => {
   it('takes credentials from the environment first, and never invents consent', () => {
-    const runtime = resolveRuntime({ CRONOMETER_USERNAME: 'a@b.test', CRONOMETER_PASSWORD: 'pw', CRONOMETER_TIMEZONE: 'Asia/Tokyo' });
+    const directory = mkdtempSync(join(tmpdir(), 'cronometer-runtime-'));
+    directories.push(directory);
+    const runtime = resolveRuntime({ CRONOMETER_USERNAME: 'a@b.test', CRONOMETER_PASSWORD: 'pw', CRONOMETER_TIMEZONE: 'Asia/Tokyo', CRONOMETER_DATA_DIR: directory });
     expect(runtime.source).toBe('environment');
     expect(runtime.timeZone).toBe('Asia/Tokyo');
     expect(runtime.environment['CRONOMETER_LIVE_ENABLED']).toBe('');
     expect(runtime.problem).toContain('CRONOMETER_LIVE_ENABLED');
+    expect(resolveRuntime({ CRONOMETER_USERNAME: 'a', CRONOMETER_PASSWORD: 'b', CRONOMETER_LIVE_ENABLED: 'false', CRONOMETER_DATA_DIR: directory }).problem).toContain('CRONOMETER_LIVE_ENABLED');
+  });
+
+  it('accepts the "true" a Claude Desktop extension checkbox sends', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'cronometer-runtime-'));
+    directories.push(directory);
+    const runtime = resolveRuntime({ CRONOMETER_USERNAME: 'a', CRONOMETER_PASSWORD: 'b', CRONOMETER_LIVE_ENABLED: 'true', CRONOMETER_TIMEZONE: '', CRONOMETER_DATA_DIR: directory });
+    expect(runtime.problem).toBeUndefined();
+    expect(runtime.environment['CRONOMETER_DATA_DIR']).toBe(directory);
+    expect(runtime.timeZone).not.toBe('');
   });
 
   it('says how to set up when there is nothing to use, and still starts', () => {
@@ -113,7 +125,9 @@ describe('the runtime', () => {
   });
 
   it('passes read-only mode through to the server', () => {
-    const runtime = resolveRuntime({ CRONOMETER_USERNAME: 'a', CRONOMETER_PASSWORD: 'b', CRONOMETER_LIVE_ENABLED: '1', CRONOMETER_READ_ONLY: '1' });
+    const directory = mkdtempSync(join(tmpdir(), 'cronometer-runtime-'));
+    directories.push(directory);
+    const runtime = resolveRuntime({ CRONOMETER_USERNAME: 'a', CRONOMETER_PASSWORD: 'b', CRONOMETER_LIVE_ENABLED: '1', CRONOMETER_READ_ONLY: '1', CRONOMETER_DATA_DIR: directory });
     expect(runtime.environment['CRONOMETER_READ_ONLY']).toBe('1');
     expect(runtime.problem).toBeUndefined();
   });
