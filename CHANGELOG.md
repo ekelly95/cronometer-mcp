@@ -2,7 +2,7 @@
 
 Notable changes, newest first.
 
-## 1.0.0 — unreleased
+## 1.0.0 — 2026-10-18
 
 The first public release, and a rewrite of the live connection.
 
