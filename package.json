@@ -1,6 +1,6 @@
 {
   "name": "@ekelly95/cronometer-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for your Cronometer account: the full diary over Cronometer's mobile API, honest coverage-aware nutrition (missing is never zero), safe writes, and an optional OAuth remote connector.",
   "keywords": [
     "mcp",

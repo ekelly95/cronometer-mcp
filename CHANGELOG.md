@@ -2,7 +2,7 @@
 
 Notable changes, newest first.
 
-## Unreleased
+## 1.0.1 — 2026-10-18
 
 ### Fixed
 - `get_daily_summary` gave the account profile's default energy range as the energy
