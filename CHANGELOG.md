@@ -14,6 +14,10 @@ Notable changes, newest first.
 - The live backend treated an `import_recipe` call without `save` as a save. The tool's
   schema always defaulted to `save: false`, so this was unreachable through MCP; the
   backend now agrees.
+- Windows: a password with non-ASCII characters could be saved or read back wrong,
+  because PowerShell decodes its pipes in the console code page. The secret now crosses
+  the pipe as base64, and setup checks that it decrypts back unchanged before saving.
+  (Unit-tested; not yet run on a real Windows machine.)
 
 ### Security
 - Remote connector: anyone who could reach `/register` could push the owner's signed-in

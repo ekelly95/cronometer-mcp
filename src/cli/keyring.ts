@@ -83,16 +83,33 @@ export const macKeychain: Keyring = {
 };
 
 const POWERSHELL = 'powershell.exe';
+/**
+ * Windows PowerShell decodes standard input and encodes standard output in the
+ * console code page, not UTF-8, so a password with any non-ASCII character would
+ * be protected or returned altered. The secret therefore crosses the pipe as
+ * base64 of its UTF-8 bytes, which every code page carries unchanged. (DPAPI's
+ * own ciphertext is hex, so it is safe as it is.)
+ */
+const toBase64 = (text: string): string => Buffer.from(text, 'utf8').toString('base64');
+const fromBase64 = (text: string): string => Buffer.from(text.trim(), 'base64').toString('utf8');
 
-/** DPAPI ciphertext for a secret, decryptable only by this Windows account. */
+/**
+ * DPAPI ciphertext for a secret, decryptable only by this Windows account. The
+ * ciphertext is decrypted again before it is returned, so a secret that would
+ * not come back intact is never saved.
+ */
 export function dpapiProtect(secret: string): string {
   const script =
-    '$s = [Console]::In.ReadToEnd(); ' +
+    '$s = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd().Trim())); ' +
     '$secure = ConvertTo-SecureString -String $s -AsPlainText -Force; ' +
     '[Console]::Out.Write((ConvertFrom-SecureString -SecureString $secure))';
-  const result = run(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', script], secret);
+  const result = run(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', script], toBase64(secret));
   if (!result.ok || result.stdout.trim() === '') throw new Error(`Could not protect the password with DPAPI: ${result.stderr.trim()}`);
-  return result.stdout.trim();
+  const ciphertext = result.stdout.trim();
+  if (dpapiUnprotect(ciphertext) !== secret) {
+    throw new Error('Could not protect the password with DPAPI: it did not decrypt back to the same text.');
+  }
+  return ciphertext;
 }
 
 export function dpapiUnprotect(ciphertext: string): string {
@@ -100,11 +117,11 @@ export function dpapiUnprotect(ciphertext: string): string {
     '$c = [Console]::In.ReadToEnd().Trim(); ' +
     '$secure = ConvertTo-SecureString -String $c; ' +
     '$pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); ' +
-    'try { [Console]::Out.Write([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)) } ' +
+    'try { [Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)))) } ' +
     'finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }';
   const result = run(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', script], ciphertext);
   if (!result.ok) throw new Error('Could not decrypt the saved password. It can only be read by the Windows account that saved it; run `cronometer-mcp setup` again.');
-  return result.stdout;
+  return fromBase64(result.stdout);
 }
 
 export function keyringFor(source: 'keychain' | 'libsecret'): Keyring {

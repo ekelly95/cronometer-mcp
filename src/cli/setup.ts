@@ -103,12 +103,17 @@ export async function runSetup(options: { readonly register: boolean }): Promise
 
   // Only now, with the sign-in proven, does anything reach the credential store.
   let config: LiveConfig = { username, timezone, credentialSource: source, twoFactor: totpSecret !== '' };
-  if (source === 'dpapi') {
-    config = { ...config, passwordDpapi: dpapiProtect(password), ...(totpSecret === '' ? {} : { totpDpapi: dpapiProtect(totpSecret) }) };
-  } else {
-    const keyring = keyringFor(source);
-    keyring.store(username, password, KEYRING_SERVICE);
-    if (totpSecret !== '') keyring.store(`${username}#totp`, totpSecret, KEYRING_SERVICE);
+  try {
+    if (source === 'dpapi') {
+      config = { ...config, passwordDpapi: dpapiProtect(password), ...(totpSecret === '' ? {} : { totpDpapi: dpapiProtect(totpSecret) }) };
+    } else {
+      const keyring = keyringFor(source);
+      keyring.store(username, password, KEYRING_SERVICE);
+      if (totpSecret !== '') keyring.store(`${username}#totp`, totpSecret, KEYRING_SERVICE);
+    }
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\nThe configuration was not saved.\n`);
+    return 1;
   }
   writeLiveConfig(configFile(directory), config);
   process.stdout.write(`Saved. Configuration and session caches live in ${directory}.\n`);
