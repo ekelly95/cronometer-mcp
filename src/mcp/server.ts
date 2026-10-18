@@ -94,6 +94,11 @@ function fence(heading: string, marker: string, encoded: string): string {
 export interface LiveCaller {
   call(method: LiveMethod, params?: JsonObject): Promise<LiveResult>;
   close(): Promise<void>;
+  /**
+   * Removes the secrets this caller holds. A password read from the OS keyring is
+   * in the caller's own environment, never `process.env`, so only it can find it.
+   */
+  redact?(text: string): string;
 }
 
 export interface BuildServerOptions {
@@ -155,9 +160,10 @@ function success(
   };
 }
 
-function failure(error: unknown): CallToolResult {
+function failure(error: unknown, bridge: LiveCaller): CallToolResult {
   const message = error instanceof Error ? error.message : 'Unknown live connector error';
   let safe = redactSecrets(message);
+  if (bridge.redact !== undefined) safe = bridge.redact(safe);
   // The lookbehind keeps the drive-letter rule off URLs. Without it, the `s:/` in
   // `https://` matched, and every URL in an error became `http[local path]`.
   safe = safe
@@ -690,7 +696,7 @@ async function invoke(
       ...(unverified ? { unverified: true as const } : {}),
     });
   } catch (error) {
-    return failure(error);
+    return failure(error, bridge);
   }
 }
 

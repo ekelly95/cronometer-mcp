@@ -559,6 +559,32 @@ describe('MCP protocol surface', () => {
    * so — an empty list on its own is what reported a logged weight as "no
    * biometrics recorded".
    */
+  it('removes a secret only the bridge knows from an error, such as a password read from the keyring', async () => {
+    const secret = 'keyring-only-password-1234';
+    expect(process.env['CRONOMETER_PASSWORD']).not.toBe(secret);
+    const server = buildServer({
+      bridge: {
+        async call(): Promise<LiveResult> {
+          throw new Error(`Cronometer said no to ${secret}`);
+        },
+        async close(): Promise<void> {},
+        redact: (text) => text.split(secret).join('[redacted]'),
+      },
+      configuration: TEST_CONFIGURATION,
+    });
+    const client = new Client({ name: 'redaction-test', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    connections.push({ client, server });
+    await client.listTools();
+    const result = await client.callTool({ name: 'get_repeated_items', arguments: {} });
+    expect(result.isError).toBe(true);
+    const text = JSON.stringify(result.content);
+    expect(text).not.toContain(secret);
+    expect(text).toContain('[redacted]');
+  });
+
   describe('an unconfirmed empty answer keeps its doubt all the way out', () => {
     async function callWith(unverified: boolean): Promise<Record<string, unknown>> {
       const server = buildServer({

@@ -334,6 +334,11 @@ export class CronometerBackend {
     }
   }
 
+  /** Removes every credential and session token this backend holds from `text`. */
+  public redact(text: string): string {
+    return this.#redact(text);
+  }
+
   #redact(text: string): string {
     return redactValues(redactSecrets(text, this.#environment), [...this.#mobile.secrets(), ...this.#web.secrets()]);
   }
