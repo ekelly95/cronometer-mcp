@@ -74,8 +74,8 @@ it.
 | `get_repeated_items` | web · `getRepeatedItems` | verified |
 | `export_*`, `export_raw` | web · `generateAuthorizationToken`, `/export` | verified |
 | `list_exports`, `analyze_export` | local files | local only |
-| `add_food_entry` | mobile · `get_food`, `add_serving` | verified |
-| `update_food_entry` | mobile · `get_diary`, `edit_serving` | verified (grams and diary group) |
+| `add_food_entry` | mobile · `get_food`, `add_serving` | verified (except a recipe's Recipe-type serving measure, which counts servings; only recipes made in the app have one) |
+| `update_food_entry` | mobile · `get_diary`, `edit_serving` | verified (grams, measure and diary group) |
 | `remove_diary_entries` | mobile · `get_diary`, v3 `DELETE diary-entries` | verified (food, note, biometric, exercise) |
 | `copy_day` | mobile · `copy` | verified |
 | `mark_day_complete` | mobile · `set_complete` | verified |
@@ -83,7 +83,7 @@ it.
 | `add_biometric` | mobile · `add_biometric` | verified (weight) |
 | `add_exercise` | mobile · `add_exercise` | verified |
 | `add_custom_food`, `update_custom_food`, `retire_custom_food` | mobile · `get_food`, `add_food` | verified (retire also covers recipes) |
-| `add_recipe`, `import_recipe` | mobile · `get_foods`, `import_recipe`, `poll_async_result`, `add_food` | verified (import as preview; saving uses `add_recipe`'s payload) |
+| `add_recipe`, `import_recipe` | mobile · `get_foods`, `import_recipe`, `poll_async_result`, `add_food` | verified (preview and save) |
 | `set_macro_targets` | web · `updateDailyTargetTemplate` | verified |
 | `create_macro_template`, `delete_macro_template` | web · `saveMacroTargetTemplate`, `deleteMacroTargetTemplate` | verified |
 | `set_macro_schedule_day` | web · `saveMacroSchedule` | verified ("monday" changes Monday) |
