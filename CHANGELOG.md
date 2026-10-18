@@ -2,7 +2,7 @@
 
 Notable changes, newest first.
 
-## Unreleased
+## 1.0.2 — 2026-10-18
 
 ### Fixed
 - `add_custom_food` saved 0 for fiber, sugars, sodium and saturated fat when they were
