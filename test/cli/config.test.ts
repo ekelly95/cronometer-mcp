@@ -47,6 +47,12 @@ describe('a configuration that is fine', () => {
     expect(parseLiveConfig(JSON.stringify(withoutField)).credentialSource).toBe('dpapi');
   });
 
+  it('reads a DPAPI configuration from before 1.0.2 as using the console transport', () => {
+    const windows = { ...VALID, credential_source: 'dpapi', password_dpapi: '01000000d08c9ddf' };
+    expect(parseLiveConfig(JSON.stringify(windows))).not.toHaveProperty('dpapiTransport');
+    expect(parseLiveConfig(JSON.stringify({ ...windows, dpapi_transport: 'base64' })).dpapiTransport).toBe('base64');
+  });
+
   it('round-trips through the writer with private permissions', () => {
     const directory = mkdtempSync(join(tmpdir(), 'cronometer-config-'));
     directories.push(directory);

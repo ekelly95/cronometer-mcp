@@ -91,6 +91,12 @@ const POWERSHELL = 'powershell.exe';
  * own ciphertext is hex, so it is safe as it is.)
  */
 const toBase64 = (text: string): string => Buffer.from(text, 'utf8').toString('base64');
+/**
+ * `console` is how 1.0.1 and earlier passed secrets: through the code page. A
+ * non-ASCII secret was saved as whatever PowerShell decoded, and only reading it
+ * back through the same code page restores it, so those configurations keep it.
+ */
+export type DpapiTransport = 'base64' | 'console';
 const fromBase64 = (text: string): string => Buffer.from(text.trim(), 'base64').toString('utf8');
 
 /**
@@ -112,16 +118,17 @@ export function dpapiProtect(secret: string): string {
   return ciphertext;
 }
 
-export function dpapiUnprotect(ciphertext: string): string {
+export function dpapiUnprotect(ciphertext: string, transport: DpapiTransport = 'base64'): string {
+  const plain = '[Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)';
   const script =
     '$c = [Console]::In.ReadToEnd().Trim(); ' +
     '$secure = ConvertTo-SecureString -String $c; ' +
     '$pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); ' +
-    'try { [Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)))) } ' +
+    `try { [Console]::Out.Write(${transport === 'base64' ? `[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(${plain}))` : plain}) } ` +
     'finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }';
   const result = run(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', script], ciphertext);
   if (!result.ok) throw new Error('Could not decrypt the saved password. It can only be read by the Windows account that saved it; run `cronometer-mcp setup` again.');
-  return fromBase64(result.stdout);
+  return transport === 'base64' ? fromBase64(result.stdout) : result.stdout;
 }
 
 export function keyringFor(source: 'keychain' | 'libsecret'): Keyring {

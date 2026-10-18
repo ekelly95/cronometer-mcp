@@ -40,6 +40,14 @@ describe('DPAPI', () => {
     expect(dpapiUnprotect('01000000d08c9ddf')).toBe(SECRET);
   });
 
+  it('reads a secret saved by 1.0.1 back through the console, exactly as it was saved', () => {
+    // Saved through code page 437, "ä" arrived as two characters; written back the
+    // same way they become the original bytes again.
+    powershell('pÃ¤sswÃ¶rd');
+    expect(dpapiUnprotect('01000000d08c9ddf', 'console')).toBe('pÃ¤sswÃ¶rd');
+    expect(String((spawn.mock.calls[0]?.[1] as string[]).at(-1))).not.toContain('Base64');
+  });
+
   it('refuses a secret that comes back altered, so setup saves nothing', () => {
     powershell('01000000d08c9ddf', base64('p?ssw?rd?'));
     expect(() => dpapiProtect(SECRET)).toThrow('did not decrypt back to the same text');

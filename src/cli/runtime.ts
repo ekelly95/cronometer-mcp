@@ -67,8 +67,9 @@ export function migrateLegacy(environment: Readonly<NodeJS.ProcessEnv> = process
 export function readSecrets(config: LiveConfig): { readonly password: string; readonly totpSecret?: string } {
   if (config.credentialSource === 'dpapi') {
     if (config.passwordDpapi === undefined) throw new Error('The saved configuration has no password. Run `cronometer-mcp setup` again.');
-    const password = dpapiUnprotect(config.passwordDpapi);
-    return config.totpDpapi === undefined ? { password } : { password, totpSecret: dpapiUnprotect(config.totpDpapi) };
+    const transport = config.dpapiTransport ?? 'console';
+    const password = dpapiUnprotect(config.passwordDpapi, transport);
+    return config.totpDpapi === undefined ? { password } : { password, totpSecret: dpapiUnprotect(config.totpDpapi, transport) };
   }
   const keyring = keyringFor(config.credentialSource);
   const password = keyring.lookup(config.username, KEYRING_SERVICE) ?? keyring.lookup(config.username, LEGACY_KEYRING_SERVICE);

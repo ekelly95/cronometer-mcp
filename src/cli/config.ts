@@ -1,6 +1,8 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import type { DpapiTransport } from './keyring.js';
+
 /**
  * live-config.json: who to sign in as and how, never the password itself (except
  * on Windows, where it is DPAPI ciphertext that only this Windows account can
@@ -19,6 +21,12 @@ export interface LiveConfig {
   /** DPAPI ciphertext, Windows only. */
   readonly passwordDpapi?: string;
   readonly totpDpapi?: string;
+  /**
+   * How the DPAPI secrets crossed PowerShell's pipes when they were saved. Absent
+   * means through the console code page (1.0.1 and earlier), which must be read
+   * back the same way to get the same text.
+   */
+  readonly dpapiTransport?: DpapiTransport;
 }
 
 const CONTROL = /[\r\n\0]/;
@@ -71,6 +79,7 @@ export function parseLiveConfig(text: string): LiveConfig {
     twoFactor: record['two_factor'] === true,
     ...(typeof passwordDpapi === 'string' ? { passwordDpapi } : {}),
     ...(typeof totpDpapi === 'string' ? { totpDpapi } : {}),
+    ...(record['dpapi_transport'] === 'base64' ? { dpapiTransport: 'base64' as const } : {}),
   };
 }
 
@@ -90,6 +99,7 @@ export function writeLiveConfig(path: string, config: LiveConfig): void {
     two_factor: config.twoFactor,
     ...(config.passwordDpapi === undefined ? {} : { password_dpapi: config.passwordDpapi }),
     ...(config.totpDpapi === undefined ? {} : { totp_dpapi: config.totpDpapi }),
+    ...(config.dpapiTransport === undefined ? {} : { dpapi_transport: config.dpapiTransport }),
   };
   const temporary = `${path}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 });

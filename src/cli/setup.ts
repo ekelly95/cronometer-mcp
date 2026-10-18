@@ -106,7 +106,12 @@ export async function runSetup(options: { readonly register: boolean }): Promise
   let config: LiveConfig = { username, timezone, credentialSource: source, twoFactor: totpSecret !== '' };
   try {
     if (source === 'dpapi') {
-      config = { ...config, passwordDpapi: dpapiProtect(password), ...(totpSecret === '' ? {} : { totpDpapi: dpapiProtect(totpSecret) }) };
+      config = {
+        ...config,
+        passwordDpapi: dpapiProtect(password),
+        ...(totpSecret === '' ? {} : { totpDpapi: dpapiProtect(totpSecret) }),
+        dpapiTransport: 'base64',
+      };
     } else {
       const keyring = keyringFor(source);
       keyring.store(username, password, KEYRING_SERVICE);

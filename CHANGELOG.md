@@ -14,10 +14,12 @@ Notable changes, newest first.
 - The live backend treated an `import_recipe` call without `save` as a save. The tool's
   schema always defaulted to `save: false`, so this was unreachable through MCP; the
   backend now agrees.
-- Windows: a password with non-ASCII characters could be saved or read back wrong,
-  because PowerShell decodes its pipes in the console code page. The secret now crosses
-  the pipe as base64, and setup checks that it decrypts back unchanged before saving.
-  (Unit-tested; not yet run on a real Windows machine.)
+- Windows: PowerShell decodes its pipes in the console code page, so on a multi-byte
+  code page (Japanese, Chinese, Korean Windows) a non-ASCII password was saved mangled
+  while setup reported success. The secret now crosses the pipe as base64, and setup
+  checks that it decrypts back unchanged before saving. Configurations saved by 1.0.1 or
+  earlier are still read the old way, which on single-byte code pages such as 437
+  always returned the original text. Checked on Windows 11.
 - `get_fasting_history` without an `end_date` ended on today in UTC, which is tomorrow
   every evening in the Americas. It now uses the diary timezone.
 - `remove_diary_entries` deleted every entry carrying a given id, though ids are unique
