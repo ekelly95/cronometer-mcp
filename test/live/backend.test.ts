@@ -132,6 +132,20 @@ describe('writing to the diary', () => {
     await expect(backend().call('add_food_entry', { food_id: 101, measure_id: 999, quantity: 1, date: '2026-08-15', diary_group: 1 })).rejects.toThrow('has no measure 999');
   });
 
+  it('removes nothing when one id names entries of two types', async () => {
+    const fake = new FakeCronometer({
+      handlers: {
+        get_diary: (body) =>
+          diaryDay(String(body['day']), [
+            { type: 'Exercise', exerciseId: 99, name: 'Running', minutes: 30, order: (4 << 16) | 1, day: '2026-08-15' },
+            { type: 'Note', noteId: 99, text: 'Long run', order: (1 << 16) | 2, day: '2026-08-15' },
+          ]),
+      },
+    });
+    await expect(backend(fake).call('remove_diary_entries', { date: '2026-08-15', entry_ids: [99] })).rejects.toThrow('Id 99 names more than one entry on 2026-08-15 (Exercise and Note)');
+    expect(fake.calls('/api/v3/user/4242/diary-entries')).toHaveLength(0);
+  });
+
   it('deletes entries of any type, reshaped the way the delete endpoint needs', async () => {
     const fake = new FakeCronometer();
     const { value } = await backend(fake).call('remove_diary_entries', { date: '2026-08-15', entry_ids: [5_000_000_001, 99, 88, 12345] });
@@ -223,6 +237,23 @@ describe('writing to the diary', () => {
     // A zero the caller gave is a real value, and is kept.
     expect(data.nutrients.find((nutrient) => nutrient.id === MOBILE_IDS.sodium)?.amount).toBe(0);
     expect(data.nutrients.find((nutrient) => nutrient.id === MOBILE_IDS.netCarbs)?.amount).toBe(40);
+  });
+});
+
+describe('fasting', () => {
+  it('ends the default history on today in the diary timezone, not in UTC', async () => {
+    const fake = new FakeCronometer({ handlers: { get_fasting_with_date_range: () => ({ fasts: [] }) } });
+    const evening = new CronometerBackend({
+      environment: ENVIRONMENT,
+      timeZone: 'America/New_York',
+      minimumIntervalMs: 0,
+      diagnostics: () => {},
+      fetch: fake.fetch,
+      // 9 PM on 15 August in New York, already the 16th in UTC.
+      now: () => new Date('2026-08-16T01:00:00Z'),
+    });
+    const { value } = await evening.call('get_fasting_history', {});
+    expect(value).toMatchObject({ start_date: '2025-08-15', end_date: '2026-08-15' });
   });
 });
 

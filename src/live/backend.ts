@@ -122,6 +122,8 @@ export interface LiveBackendOptions {
   /** Why credentials are unavailable, said instead of a generic error on every live call. */
   readonly setupProblem?: string;
   readonly diagnostics?: (text: string) => void;
+  /** The clock, for tests. */
+  readonly now?: () => Date;
 }
 
 /** How many days one diary read may cover: each day is a request. */
@@ -219,6 +221,12 @@ function json(value: unknown): JsonValue {
 }
 
 /** The clock time now in the diary timezone, as Cronometer writes it: `7:5:30`. */
+/** Today in the diary timezone, as YYYY-MM-DD. A UTC "today" runs a day ahead every evening in the Americas. */
+function todayIn(timeZone: string | undefined, now: Date): string {
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timeZone ?? 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+
 function clockIn(timeZone: string | undefined): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: timeZone ?? 'UTC',
@@ -248,6 +256,7 @@ const ENTRY_ID_KEYS: Readonly<Record<string, string>> = {
 export class CronometerBackend {
   readonly #environment: Readonly<NodeJS.ProcessEnv>;
   readonly #timeZone: string | undefined;
+  readonly #now: () => Date;
   readonly #mobile: MobileClient;
   readonly #web: WebClient;
   readonly #minimumIntervalMs: number;
@@ -261,6 +270,7 @@ export class CronometerBackend {
   public constructor(options: LiveBackendOptions = {}) {
     this.#environment = options.environment ?? process.env;
     this.#timeZone = options.timeZone;
+    this.#now = options.now ?? (() => new Date());
     const directory = this.#environment['CRONOMETER_DATA_DIR']?.trim();
     this.#dataDirectory = directory === undefined || directory === '' ? undefined : directory;
     const problem = options.setupProblem;
@@ -370,7 +380,7 @@ export class CronometerBackend {
     const profile = await this.#mobile.profile();
     let nutrients = profile.nutrients;
     if (nutrients.length === 0) {
-      const response = await this.#read('get_nutrients', { day: cronometerDay(new Date().toISOString().slice(0, 10)) });
+      const response = await this.#read('get_nutrients', { day: cronometerDay(todayIn(this.#timeZone, this.#now())) });
       nutrients = Array.isArray(response['nutrients']) ? response['nutrients'].filter(isRecord) : [];
     }
     const catalog = new Map<number, { readonly name: string; readonly unit: string }>();
@@ -541,8 +551,7 @@ export class CronometerBackend {
       }
 
       case 'get_fasting_history': {
-        const today = new Date().toISOString().slice(0, 10);
-        const end = params['end_date'] === undefined ? today : isoDay(params, 'end_date');
+        const end = params['end_date'] === undefined ? todayIn(this.#timeZone, this.#now()) : isoDay(params, 'end_date');
         const start =
           params['start_date'] === undefined
             ? new Date(Date.parse(`${end}T00:00:00Z`) - 365 * 86_400_000).toISOString().slice(0, 10)
@@ -1078,6 +1087,7 @@ export class CronometerBackend {
     const entries = Array.isArray(diary['diary']) ? diary['diary'].filter(isRecord) : [];
     const matched: JsonRecord[] = [];
     const removed: string[] = [];
+    const typesById = new Map<string, string[]>();
     for (const entry of entries) {
       const type = str(entry['type']) ?? 'Serving';
       const key = ENTRY_ID_KEYS[type];
@@ -1093,7 +1103,18 @@ export class CronometerBackend {
       }
       if (isRecord(reshaped['meta'])) reshaped['meta'] = JSON.stringify(reshaped['meta']);
       matched.push(reshaped);
-      removed.push(String(id));
+      if (typesById.has(String(id))) typesById.get(String(id))!.push(type);
+      else {
+        typesById.set(String(id), [type]);
+        removed.push(String(id));
+      }
+    }
+    // Ids are unique only within a type. One that names two entries is ambiguous,
+    // and deleting both would remove something nobody asked to remove.
+    for (const [id, types] of typesById) {
+      if (types.length > 1) {
+        throw new LiveBackendError(`Id ${id} names more than one entry on ${day} (${types.join(' and ')}), so nothing was removed. Remove it in the Cronometer app.`);
+      }
     }
     const notFound = [...wanted].filter((id) => !removed.includes(id));
     if (matched.length === 0) {

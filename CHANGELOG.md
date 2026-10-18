@@ -18,6 +18,10 @@ Notable changes, newest first.
   because PowerShell decodes its pipes in the console code page. The secret now crosses
   the pipe as base64, and setup checks that it decrypts back unchanged before saving.
   (Unit-tested; not yet run on a real Windows machine.)
+- `get_fasting_history` without an `end_date` ended on today in UTC, which is tomorrow
+  every evening in the Americas. It now uses the diary timezone.
+- `remove_diary_entries` deleted every entry carrying a given id, though ids are unique
+  only within a type. An id that names two entries now removes nothing and says so.
 
 ### Security
 - Remote connector: anyone who could reach `/register` could push the owner's signed-in
