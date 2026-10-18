@@ -1,9 +1,54 @@
 # Changelog
 
-Notable changes, newest first. Dates are when the change was committed. There are no
-published releases; `package.json` stays at `0.1.0`.
+Notable changes, newest first.
 
-## Unreleased
+## 1.0.0 — unreleased
+
+The first public release, and a rewrite of the live connection.
+
+### Changed
+- **The live connection is now TypeScript talking to Cronometer's mobile API.** The
+  vendored Python GWT client, its bridge process and the `uv` environment are gone. The
+  web protocol is kept, in TypeScript, only for CSV exports, macro templates and the
+  weekly schedule, fast edits and repeated foods. See `docs/PROTOCOL.md`.
+- **Renamed** to `@ekelly95/cronometer-mcp`; the MCP server key is `cronometer`, so tools
+  appear as `mcp__cronometer__<tool>`, and tool names lose their `cronometer_` prefix. An
+  existing setup is migrated on first run (the old directory and keyring entry are left
+  in place).
+- **One command, every platform:** `cronometer-mcp setup` replaces the three setup scripts
+  and two launchers. It checks the sign-in before saving anything, stores the password in
+  the OS credential store, and offers to register with Claude Code, Claude Desktop and
+  Codex. The server reads the password into its own memory rather than passing it
+  through the environment of three processes.
+- Diary reads (`get_diary`) return every entry with its id, so any entry can be edited or
+  deleted, not only ones logged in the same conversation.
+- Date inputs accept "today", "yesterday" and "N days ago", resolved in the diary timezone.
+- Tools that read the CSV export are now named `export_*` and are meant for long ranges.
+
+### Added
+- `get_daily_summary`: live, coverage-aware nutrition computed food by food, with the
+  account's own targets. A nutrient a food does not report counts against coverage
+  instead of adding a silent zero.
+- `nutrient_radar` reads the live diary by default; a downloaded export is optional.
+- `get_nutrition_scores`, `lookup_barcode`, `list_biometric_metrics`, `get_biometrics`,
+  `search_activities`.
+- Writes: `update_food_entry`, `remove_diary_entries` (any entry type), `mark_day_complete`,
+  `add_note`, `update_note`, `add_exercise`, `add_custom_food`, `update_custom_food`,
+  `retire_custom_food`, `add_recipe`, `import_recipe`. `add_food_entry` takes any measure
+  or grams; `add_biometric` takes any metric and unit.
+- Two-factor sign-in (TOTP), read-only mode (`CRONOMETER_READ_ONLY=1`), and a description
+  on every write not yet verified against a live account.
+- `cronometer-mcp doctor`, `remote-setup` and `serve-http`: the OAuth remote connector now
+  runs on Linux (systemd user service) and macOS (launch agent), not only Windows.
+- An MCPB bundle for one-click Claude Desktop install, and an MCP Registry entry.
+
+### Fixed
+- Repeated foods: the response reader follows GWT object back-references. The old reader
+  failed on any account with more than one repeated food.
+- Expired session tokens stay on the redaction list, so one cannot leak into an error
+  after a new session replaces it.
+
+## 0.x — 2026-08-17 to 2026-10-14 (never published)
 
 ### Added
 - `cronometer_nutrient_radar` and the `nutrient_radar` prompt. They average a downloaded

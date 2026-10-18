@@ -1,30 +1,35 @@
 # Third-party notices
 
-The live connector's protocol client began as `cronometer-mcp` 2.0.3 by Paul Hoskins.
-It is **vendored and modified**, at `python/vendor/cronometer_client.py`, rather than
-installed as a dependency. The MIT licence permits this and requires the copyright and
-permission notice below to travel with the copy, which is what this file is for.
+This connector stands on two earlier open-source projects. Both are MIT-licensed; the
+licence asks that the copyright and permission notice travel with copies of substantial
+portions, which is what this file is for.
 
-Why it was vendored, plainly: upstream's last commit was 2026-03-08. By August it had
-eight open issues and four unmerged pull requests, two of them fixing a Cronometer
-change that had already broken food search outright. A pinned dependency cannot be
-patched, and the fixes existed but were going nowhere. Vendoring made them applicable.
+## cronometer-api-mcp — the mobile API
 
-The header of the vendored file lists every deliberate difference from the original —
-the food-search endpoint, the retry rules, the parse-failure behaviour, the removal of
-the pickle session store. Two of those changes are adapted from public pull requests
-against the upstream project by **alex-mark** (#8) and **auctionsjeff** (#6), with a
-third from **varunsaravagi** (#2); a fourth, by **alexey-igrychev** (#1), was adopted
-only in part, because its retry would have re-sent account-changing writes.
+The mobile API client (`src/live/mobile/`, and the payload builders in `src/live/foods.ts`
+and `src/live/backend.ts`) is a TypeScript implementation of the protocol established by
+**Randy Westergren** in [cronometer-api-mcp](https://github.com/rwestergren/cronometer-api-mcp),
+which worked it out by inspecting Cronometer's Android app. Endpoint names, the sign-in
+body (including the finding that a non-null `timezone` overwrites the account's), the
+auth block, the v3 delete, custom-food and recipe payloads, and the per-100 g scaling
+rules all follow that project. Request shapes for notes, biometrics, exercise, barcodes
+and serving edits follow pull requests against it by **paultristanwagner** (#72–#81).
 
-Credit where it is due: the GWT-RPC protocol work in that file is Paul Hoskins's, and
-it is the hard part. This project would not exist without it.
+Copyright (c) 2026 Randy Westergren
 
-## cronometer-mcp
+## cronometer-mcp — the web app protocol
+
+Before 1.0 the live connector *was* a vendored, modified copy of `cronometer-mcp` 2.0.3 by
+**Paul Hoskins**, run from Python. The GWT-RPC request bodies in `src/live/web/client.ts`
+are ported from it, carrying the fixes this project made: food search moved to the JSON
+endpoint (after pull requests #8 by **alex-mark** and #6 by **auctionsjeff**), refreshed
+build hashes (#2 by **varunsaravagi**), reads that retry once while writes never do
+(adapted from #1 by **alexey-igrychev**), and parsers that refuse what they cannot read
+instead of reporting it as empty. The GWT protocol work is his, and it is the hard part.
 
 Copyright (c) 2026 Paul Hoskins
 
-MIT License
+## The MIT License (both projects)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this
 software and associated documentation files (the "Software"), to deal in the Software

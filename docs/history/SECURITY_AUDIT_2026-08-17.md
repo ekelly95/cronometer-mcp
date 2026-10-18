@@ -1,8 +1,10 @@
+> **Historical document.** This describes the project before 1.0, when the live connection was a vendored Python GWT client behind a stdio bridge. It is kept for the reasoning it records; file paths and component names in it may no longer exist. The current architecture is in [`docs/PROTOCOL.md`](../PROTOCOL.md).
+
 # Defensive security audit — Personal Cronometer MCP
 
 **Date:** 2026-08-17
 **Auditor:** Claude Opus 5, at the request of the repository owner
-**Target:** `C:\dev\cronometer` at working-tree state of 2026-08-17 (three commits, large uncommitted body of work)
+**Target:** the project working tree at the state of 2026-08-17 (three commits, large uncommitted body of work)
 **Scope:** defensive code review only. No Cronometer sign-in, no credential decryption, no live request, no live write.
 
 > **Status: remediated 2026-08-17.** The audit below is preserved as written, in the

@@ -1,3 +1,5 @@
+> **Historical document.** This describes the project before 1.0, when the live connection was a vendored Python GWT client behind a stdio bridge. It is kept for the reasoning it records; file paths and component names in it may no longer exist. The current architecture is in [`docs/PROTOCOL.md`](../PROTOCOL.md).
+
 # BUILD_PLAN.md — cronometer-mcp-next
 
 Seven milestones. The user explicitly selected full live read/write on 2026-08-16.

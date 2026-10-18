@@ -21,7 +21,7 @@
     "url": "git+https://github.com/ekelly95/cronometer-mcp.git"
   },
   "license": "MIT",
-  "author": "Edmund Kelly",
+  "author": "ekelly95",
   "mcpName": "io.github.ekelly95/cronometer-mcp",
   "type": "module",
   "engines": {

@@ -6,7 +6,7 @@
   "description": "Your Cronometer diary, nutrition with honest coverage, and safe writes.",
   "long_description": "Reads and writes your Cronometer diary through Cronometer's mobile app interface: foods with ids, targets and what remains today, exercise, notes, biometrics, fasting, custom foods and recipes. Nutrition summaries are computed food by food, so a nutrient a food does not report is shown as missing rather than silently counted as zero. Every write asks for approval.\n\nCronometer has no public API; this uses the same private interfaces as its app and website. That is unofficial and may break, and Cronometer could restrict an account it sees automated. Not affiliated with Cronometer.",
   "author": {
-    "name": "Edmund Kelly",
+    "name": "ekelly95",
     "url": "https://github.com/ekelly95"
   },
   "repository": {
