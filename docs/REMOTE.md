@@ -109,8 +109,9 @@ environment to offer reads only.) What stands in the way:
   registrations per fifteen minutes and keeps at most twenty clients. A full list only
   ever drops clients that have not signed in, so registering cannot sign you out.
 - **Tokens expire and rotate.** Access tokens last an hour. Refresh tokens rotate on every
-  use and lapse after 30 days unused; a spent one presented again revokes the whole
-  connection. Only hashes are stored.
+  use and lapse after 30 days unused. A spent one presented again within a minute is
+  accepted, because Claude's own refreshes can race; presented any later, it revokes the
+  whole connection. Only hashes are stored.
 - **Loopback only.** The server binds to `127.0.0.1` and rejects any request whose `Host`
   is not your public name.
 
